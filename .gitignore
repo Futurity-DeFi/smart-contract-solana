@@ -1,0 +1,18 @@
+# === General ===
+.env
+*.key
+*.secret
+*.log
+
+# === Solana / Anchor ===
+.anchor/
+target/
+docker-target/
+**/*.so
+programs/**/keypair.json
+
+# === Ethereum / Hardhat ===
+artifacts/
+cache/
+out/
+node_modules/
