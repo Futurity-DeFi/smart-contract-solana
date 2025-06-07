@@ -1,0 +1,11 @@
+{
+  "docker_image": "solanafoundation/anchor:v0.31.1",
+  "programs": [
+    {
+      "id": "4JymiKAgXGDinoddnmUKqNZ2YvQiwkJ53iCM1jyoa3Fe",
+      "lib_name": "futurity",
+      "sha256": "5c4ad951554c22ffa234c5be19988ecc55948b3bec0e13f77d462e0aa3fe68d4"
+    }
+  ]
+}
+
