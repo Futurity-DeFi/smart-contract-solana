@@ -40,4 +40,70 @@ jobs:
     - name: ⚡ Install Anchor CLI (pre-built)
       run: |
         curl -sSfL \
-          "https://github.com/coral-xyz/anchor/releases/download/${A
+          "https://github.com/coral-xyz/anchor/releases/download/${ANCHOR_VERSION}/anchor-cli-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+          -o anchor.tar.gz
+        tar -xzf anchor.tar.gz
+        sudo mv anchor /usr/local/bin/
+
+    - name: 🏗️  Verifiable build
+      working-directory: program
+      run: |
+        anchor clean
+        anchor build --verifiable
+
+    - name: 📦 Package artefacts
+      run: |
+        mkdir -p ci-artefacts
+        cp program/target/verifiable/futurity.so  ci-artefacts/
+        cp program/target/idl/futurity.json       ci-artefacts/
+        shasum -a 256 ci-artefacts/futurity.so > ci-artefacts/futurity.sha256
+
+    - name: ⬆️  Upload artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: futurity-verifiable-${{ github.sha }}
+        path: ci-artefacts
+        retention-days: 14
+
+# ───────────────────────────── 2) DEPLOY  (optional) ───────────────────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: mainnet     # require approval before secrets unlock
+
+    steps:
+    - uses: actions/checkout@v4
+      with: { fetch-depth: 1 }
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: futurity-verifiable-${{ github.sha }}
+        path: artefacts
+
+    - name: 🗝️  Write program keypair from secret
+      run: |
+        echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+        chmod 600 program-keypair.json
+
+    - name: 🔧 Install Solana CLI
+      run: |
+        sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+    - name: 🚀 Deploy program
+      run: |
+        solana config set --keypair program-keypair.json --url $SOLANA_CLUSTER_URL
+        solana program deploy artefacts/futurity.so \
+          --program-id program-keypair.json
+
+    - name: ✅ Verify on-chain
+      run: |
+        cargo install solana-verify --locked
+        solana-verify verify-from-repo \
+          -ud \                                           # -um for mainnet
+          --url $SOLANA_CLUSTER_URL \
+          --program-id $PROGRAM_PUBKEY \
+          --library-name futurity \
+          --commit-hash ${{ github.sha }} \
+          --mount-path program/programs/futurity \
+          https://github.com/futurity-defi/smart-contract-solana
