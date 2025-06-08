@@ -1,11 +1,17 @@
 # .github/workflows/verifiable-build.yml
 #
-# 1. Builds a deterministic artefact with Anchor v0.31.1.
-# 2. (Optional) Deploys & verifies using a program keypair in the
-#    PROGRAM_KEYPAIR secret.
+# 1. **Build** a deterministic Anchor artefact (cached Anchor binary).
+# 2. **Deploy** with two keypairs:
+#       • PROGRAM_KEYPAIR   → fixed Program ID / upgrade-authority
+#       • DEPLOYER_KEYPAIR  → fee-payer (must hold SOL)
+# 3. **Verify** on-chain == GitHub commit.
 #
-# Anchor CLI is compiled *once* and cached under the key
-# `anchor-<os>-v0.31.1`.
+# Secrets required (Repo → Settings → Secrets → Actions):
+#   • PROGRAM_KEYPAIR   — JSON array produced by `solana-keygen new --no-bip39`
+#   • DEPLOYER_KEYPAIR  — funded wallet JSON array (≥2 SOL for mainnet)
+#
+# TIP  : gate the `mainnet` environment in repo settings so deploys need approval.
+# NOTE : change SOLANA_CLUSTER_URL and VERIFY_FLAG when moving from Devnet → Mainnet.
 
 name: Verifiable Build & Deploy
 
@@ -14,25 +20,29 @@ on:
   push:
     branches: [main]
 
+################################################################################
+# Global env vars
 env:
   ANCHOR_VERSION: v0.31.1
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
   PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
-  SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # mainnet later
+  SOLANA_CLUSTER_URL: https://api.devnet.solana.com     # ← switch to mainnet later
+  VERIFY_FLAG: -ud                                      # ← -um for mainnet-beta
 
+################################################################################
 jobs:
 
-# ─────────────────────────────── BUILD ────────────────────────────────
+# ───────────────────────────── 1) BUILD ───────────────────────────────────────
   build:
     runs-on: ubuntu-latest
 
     steps:
-    # 0️⃣ Checkout
-    - uses: actions/checkout@v4
+    - name: 🛎️  Checkout
+      uses: actions/checkout@v4
       with: { fetch-depth: 1 }
 
-    # 1️⃣ Restore compiled Anchor if we have it
+    # ---------- Anchor CLI cache ----------
     - name: 💾 Cache Anchor binary
       id: anchor-cache
       uses: actions/cache@v4
@@ -40,14 +50,13 @@ jobs:
         path: ~/.cargo/bin/anchor
         key: anchor-${{ runner.os }}-${{ env.ANCHOR_VERSION }}
 
-    # 2️⃣ Install Anchor (only if cache miss)
-    - name: ⚡ Install Anchor CLI (cargo build)
+    - name: ⚡ Install Anchor CLI (cargo, runs only once)
       if: steps.anchor-cache.outputs.cache-hit != 'true'
       run: |
         cargo install --git https://github.com/coral-xyz/anchor \
           --tag ${ANCHOR_VERSION} --locked anchor-cli
 
-    # 3️⃣ Cache cargo deps (cuts subsequent compile time for program crates)
+    # ---------- Cargo deps cache ----------
     - name: 💾 Cache cargo dependencies
       uses: actions/cache@v4
       with:
@@ -56,34 +65,34 @@ jobs:
           ~/.cargo/git
         key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-    # 4️⃣ Deterministic build
+    # ---------- Deterministic build ----------
     - name: 🏗️  Verifiable build
-      working-directory: program
+      working-directory: program            # workspace root
       run: |
         anchor --version
         anchor clean
         anchor build --verifiable
 
-    # 5️⃣ Package artefacts
+    # ---------- Package artefacts ----------
     - name: 📦 Package artefacts
       run: |
         mkdir -p ci-artefacts
         cp program/target/verifiable/futurity.so  ci-artefacts/
         cp program/target/idl/futurity.json       ci-artefacts/
-        shasum -a 256 ci-artefacts/futurity.so > ci-artefacts/futurity.sha256
+        shasum -a 256 ci-artefacts/futurity.so >  ci-artefacts/futurity.sha256
 
-    # 6️⃣ Upload artefacts
-    - uses: actions/upload-artifact@v4
+    - name: ⬆️  Upload artefacts
+      uses: actions/upload-artifact@v4
       with:
         name: futurity-verifiable-${{ github.sha }}
         path: ci-artefacts
         retention-days: 14
 
-# ─────────────────────────────── DEPLOY (optional) ─────────────────────────────
+# ───────────────────────────── 2) DEPLOY ──────────────────────────────────────
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: mainnet        # gate with “Required approval” in repo settings
+    environment: mainnet        # ✔️  require manual approval in repo settings
 
     steps:
     - uses: actions/checkout@v4
@@ -94,31 +103,33 @@ jobs:
         name: futurity-verifiable-${{ github.sha }}
         path: artefacts
 
-    # Keypair from secret -> file
-    - name: 🗝️  Write program keypair
+    # ---------- Materialise keypairs ----------
+    - name: 🗝️  Write program & deployer keypairs
       run: |
-        echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
-        chmod 600 program-keypair.json
+        echo '${{ secrets.PROGRAM_KEYPAIR }}'  > program-keypair.json
+        echo '${{ secrets.DEPLOYER_KEYPAIR }}' > deployer.json
+        chmod 600 program-keypair.json deployer.json
 
-    # Solana CLI
+    # ---------- Solana CLI ----------
     - name: 🔧 Install Solana CLI
       run: |
         sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
-    # Deploy
+    # ---------- Deploy ----------
     - name: 🚀 Deploy program
       run: |
-        solana config set --keypair program-keypair.json --url $SOLANA_CLUSTER_URL
+        solana config set --keypair deployer.json --url $SOLANA_CLUSTER_URL
         solana program deploy artefacts/futurity.so \
-          --program-id program-keypair.json
+          --program-id program-keypair.json \
+          --upgrade-authority program-keypair.json
 
-    # Verify
-    - name: ✅ Verify on-chain
+    # ---------- Verify ----------
+    - name: ✅ Verify on-chain == GitHub commit
       run: |
         cargo install solana-verify --locked
         solana-verify verify-from-repo \
-          -ud \                                           # -um for mainnet
+          $VERIFY_FLAG \
           --url $SOLANA_CLUSTER_URL \
           --program-id $PROGRAM_PUBKEY \
           --library-name futurity \
