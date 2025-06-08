@@ -1,24 +1,26 @@
-name: Verifiable Build
+name: Verifiable Build & Deploy
 
 on:
+  workflow_dispatch:               # manual “Release” button
   push:
-    branches: [main]            # or whichever branch you promote
-  workflow_dispatch:
+    branches: [main]               # auto-build every merge to main
+
+env:
+  PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
+  SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # mainnet url later
 
 jobs:
+
+# ───────────────────────────── 1) Build (no secrets) ───────────────────────────
   build:
     runs-on: ubuntu-latest
     env:
       DOCKER_DEFAULT_PLATFORM: linux/amd64
       CARGO_INCREMENTAL: "0"
-
     steps:
-      # 1️⃣ Check out the repo
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: {fetch-depth: 1}
 
-      # 2️⃣ Cache cargo deps for faster CI
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -27,20 +29,17 @@ jobs:
             ~/.cargo/git
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      # 3️⃣ Install Anchor CLI (v0.31.1 like on your laptop)
-      - name: Install Anchor
+      - name: Install Anchor CLI
         run: |
           cargo install --git https://github.com/coral-xyz/anchor \
             --tag v0.31.1 --locked anchor-cli
 
-      # 4️⃣ Deterministic build – note the working-directory
       - name: Verifiable build
-        working-directory: program       # <── NEW
+        working-directory: program
         run: |
           anchor clean
           anchor build --verifiable
 
-      # 5️⃣ Collect artefacts from program/target/…
       - name: Package artefacts
         run: |
           mkdir -p ci-artefacts
@@ -48,9 +47,53 @@ jobs:
           cp program/target/idl/futurity.json       ci-artefacts/
           shasum -a 256 ci-artefacts/futurity.so >  ci-artefacts/futurity.sha256
 
-      # 6️⃣ Upload for 14 days
       - uses: actions/upload-artifact@v4
         with:
           name: futurity-verifiable-${{ github.sha }}
           path: ci-artefacts
           retention-days: 14
+
+# ───────────────────────────── 2) Deploy (needs secrets) ───────────────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: mainnet          # require “Approve” before secrets unlock
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: futurity-verifiable-${{ github.sha }}
+          path: artefacts
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      # Materialise the secret keypair securely
+      - name: Write program keypair
+        run: |
+          echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+          chmod 600 program-keypair.json
+
+      # Deploy with the *same* Program ID that is in Anchor.toml & lib.rs
+      - name: Deploy to Solana
+        run: |
+          solana config set --keypair program-keypair.json --url $SOLANA_CLUSTER_URL
+          solana program deploy artefacts/futurity.so \
+            --program-id program-keypair.json
+
+      # Optional: on-chain verification straight from CI
+      - name: Verify program
+        run: |
+          cargo install solana-verify --locked
+          solana-verify verify-from-repo \
+            -ud \                                        # -um for mainnet
+            --url $SOLANA_CLUSTER_URL \
+            --program-id $PROGRAM_PUBKEY \
+            --library-name futurity \
+            --commit-hash ${{ github.sha }} \
+            --mount-path program/programs/futurity \
+            https://github.com/futurity-defi/smart-contract-solana
