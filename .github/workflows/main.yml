@@ -1,35 +1,33 @@
 # .github/workflows/verifiable-build.yml
 #
-# Builds a *deterministic* Anchor artefact, then (optionally) deploys it
-# with the fixed program key stored in the `PROGRAM_KEYPAIR` secret.
-# Anchor CLI is installed from the pre-built binary → ~15 s instead of 6 min.
+# Builds a deterministic artefact with Anchor v0.31.1,
+# then (optionally) deploys & verifies it.
+# Anchor CLI comes from the pre-built binary → ~15 s.
 
 name: Verifiable Build & Deploy
 
 on:
-  workflow_dispatch:        # manual “Run workflow” button
+  workflow_dispatch:
   push:
-    branches: [main]        # change if you deploy from a different branch
+    branches: [main]
 
 env:
   ANCHOR_VERSION: v0.31.1
-  DOCKER_DEFAULT_PLATFORM: linux/amd64   # match Anchor’s SVB docker
+  DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
   PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
-  SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # swap for mainnet later
+  SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # change for mainnet
 
-# ────────────────────────────────────────────────────────────────────────────────
 jobs:
 
-# 1) Build (no secrets needed)
+# ───────────────────────────── 1) BUILD ─────────────────────────────
   build:
     runs-on: ubuntu-latest
 
     steps:
     - name: 🛎️  Checkout
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
+      with: { fetch-depth: 1 }
 
     - name: 💾 Cache cargo deps
       uses: actions/cache@v4
@@ -39,73 +37,7 @@ jobs:
           ~/.cargo/git
         key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: ⚡ Install Anchor CLI (pre-built binary)
+    - name: ⚡ Install Anchor CLI (pre-built)
       run: |
-        curl -sSL \
-          https://github.com/coral-xyz/anchor/releases/download/${ANCHOR_VERSION}/anchor-cli-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu.tar.gz \
-          | tar -xz
-        sudo mv anchor /usr/local/bin/
-
-    - name: 🏗️  Verifiable build
-      working-directory: program          # workspace root is inside “program/”
-      run: |
-        anchor clean
-        anchor build --verifiable
-
-    - name: 📦 Package artefacts
-      run: |
-        mkdir -p ci-artefacts
-        cp program/target/verifiable/futurity.so   ci-artefacts/
-        cp program/target/idl/futurity.json        ci-artefacts/
-        shasum -a 256 ci-artefacts/futurity.so >   ci-artefacts/futurity.sha256
-
-    - name: ⬆️  Upload artefacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: futurity-verifiable-${{ github.sha }}
-        path: ci-artefacts
-        retention-days: 14
-
-# 2) Deploy (needs secrets) — remove this job if you prefer local deploys
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: mainnet        # ✔️  add branch protection / approval here
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-
-    - uses: actions/download-artifact@v4
-      with:
-        name: futurity-verifiable-${{ github.sha }}
-        path: artefacts
-
-    - name: 🗝️  Write program keypair from secret
-      run: |
-        echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
-        chmod 600 program-keypair.json
-
-    - name: 🔧 Install Solana CLI
-      run: |
-        sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
-        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-
-    - name: 🚀 Deploy program
-      run: |
-        solana config set --keypair program-keypair.json --url $SOLANA_CLUSTER_URL
-        solana program deploy artefacts/futurity.so \
-          --program-id program-keypair.json
-
-    - name: ✅ Verify on-chain (Devnet)
-      run: |
-        cargo install solana-verify --locked
-        solana-verify verify-from-repo \
-          -ud \                                         # -um for mainnet-beta
-          --url $SOLANA_CLUSTER_URL \
-          --program-id $PROGRAM_PUBKEY \
-          --library-name futurity \
-          --commit-hash ${{ github.sha }} \
-          --mount-path program/programs/futurity \
-          https://github.com/futurity-defi/smart-contract-solana
+        curl -sSfL \
+          "https://github.com/coral-xyz/anchor/releases/download/${A
