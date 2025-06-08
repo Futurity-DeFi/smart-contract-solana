@@ -1,17 +1,10 @@
 # .github/workflows/verifiable-build.yml
 #
-# 1. **Build** a deterministic Anchor artefact (cached Anchor binary).
-# 2. **Deploy** with two keypairs:
-#       • PROGRAM_KEYPAIR   → fixed Program ID / upgrade-authority
-#       • DEPLOYER_KEYPAIR  → fee-payer (must hold SOL)
-# 3. **Verify** on-chain == GitHub commit.
+# Two-secret pattern:
+#   PROGRAM_KEYPAIR  → program / upgrade authority (never needs SOL)
+#   DEPLOYER_KEYPAIR → fee-payer wallet (funded)
 #
-# Secrets required (Repo → Settings → Secrets → Actions):
-#   • PROGRAM_KEYPAIR   — JSON array produced by `solana-keygen new --no-bip39`
-#   • DEPLOYER_KEYPAIR  — funded wallet JSON array (≥2 SOL for mainnet)
-#
-# TIP  : gate the `mainnet` environment in repo settings so deploys need approval.
-# NOTE : change SOLANA_CLUSTER_URL and VERIFY_FLAG when moving from Devnet → Mainnet.
+# Works on Devnet; switch VERIFY_FLAG & RPC when you’re ready for mainnet.
 
 name: Verifiable Build & Deploy
 
@@ -20,15 +13,13 @@ on:
   push:
     branches: [main]
 
-################################################################################
-# Global env vars
 env:
   ANCHOR_VERSION: v0.31.1
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
   PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
-  SOLANA_CLUSTER_URL: https://api.devnet.solana.com     # ← switch to mainnet later
-  VERIFY_FLAG: -ud                                      # ← -um for mainnet-beta
+  SOLANA_CLUSTER_URL: https://api.devnet.solana.com
+  VERIFY_FLAG: -ud                     # -um for mainnet-beta
 
 ################################################################################
 jobs:
@@ -38,11 +29,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 🛎️  Checkout
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       with: { fetch-depth: 1 }
 
-    # ---------- Anchor CLI cache ----------
     - name: 💾 Cache Anchor binary
       id: anchor-cache
       uses: actions/cache@v4
@@ -50,14 +39,13 @@ jobs:
         path: ~/.cargo/bin/anchor
         key: anchor-${{ runner.os }}-${{ env.ANCHOR_VERSION }}
 
-    - name: ⚡ Install Anchor CLI (cargo, runs only once)
+    - name: ⚡ Install Anchor CLI (cargo) – first run only
       if: steps.anchor-cache.outputs.cache-hit != 'true'
       run: |
         cargo install --git https://github.com/coral-xyz/anchor \
           --tag ${ANCHOR_VERSION} --locked anchor-cli
 
-    # ---------- Cargo deps cache ----------
-    - name: 💾 Cache cargo dependencies
+    - name: 💾 Cache cargo deps
       uses: actions/cache@v4
       with:
         path: |
@@ -65,34 +53,31 @@ jobs:
           ~/.cargo/git
         key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-    # ---------- Deterministic build ----------
     - name: 🏗️  Verifiable build
-      working-directory: program            # workspace root
+      working-directory: program
       run: |
         anchor --version
         anchor clean
         anchor build --verifiable
 
-    # ---------- Package artefacts ----------
     - name: 📦 Package artefacts
       run: |
         mkdir -p ci-artefacts
         cp program/target/verifiable/futurity.so  ci-artefacts/
         cp program/target/idl/futurity.json       ci-artefacts/
-        shasum -a 256 ci-artefacts/futurity.so >  ci-artefacts/futurity.sha256
+        shasum -a 256 ci-artefacts/futurity.so > ci-artefacts/futurity.sha256
 
-    - name: ⬆️  Upload artefacts
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
         name: futurity-verifiable-${{ github.sha }}
         path: ci-artefacts
         retention-days: 14
 
-# ───────────────────────────── 2) DEPLOY ──────────────────────────────────────
+# ───────────────────────────── 2) DEPLOY  ─────────────────────────────────────
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: mainnet        # ✔️  require manual approval in repo settings
+    environment: mainnet            # require manual approval in repo settings
 
     steps:
     - uses: actions/checkout@v4
@@ -103,20 +88,20 @@ jobs:
         name: futurity-verifiable-${{ github.sha }}
         path: artefacts
 
-    # ---------- Materialise keypairs ----------
-    - name: 🗝️  Write program & deployer keypairs
+    # ---------- Keypairs ----------
+    - name: 🗝️  Write keypairs
       run: |
         echo '${{ secrets.PROGRAM_KEYPAIR }}'  > program-keypair.json
         echo '${{ secrets.DEPLOYER_KEYPAIR }}' > deployer.json
         chmod 600 program-keypair.json deployer.json
 
-    # ---------- Solana CLI ----------
+    # ---------- Solana CLI (path becomes active for all following steps) ----------
     - name: 🔧 Install Solana CLI
       run: |
         sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
-    # ---------- Deploy ----------
+    # ---------- Deploy using the funded DEPLOYER wallet ----------
     - name: 🚀 Deploy program
       run: |
         solana config set --keypair deployer.json --url $SOLANA_CLUSTER_URL
@@ -124,7 +109,7 @@ jobs:
           --program-id program-keypair.json \
           --upgrade-authority program-keypair.json
 
-    # ---------- Verify ----------
+    # ---------- Verify reproducibility ----------
     - name: ✅ Verify on-chain == GitHub commit
       run: |
         cargo install solana-verify --locked
