@@ -17,40 +17,36 @@ env:
 
 jobs:
   precheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 1}
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with: {fetch-depth: 1}
 
-      - name: Restore program keypair & validate Program ID
-        shell: bash
-        run: |
-          # 1️⃣  restore PROGRAM_KEYPAIR (raw JSON secret)
-          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
-          chmod 600 program-keypair.json
+    - name: Restore program keypair & validate Program ID
+      shell: bash
+      run: |
+        printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+        chmod 600 program-keypair.json
 
-          # 2️⃣  install Solana CLI (robust: archive + retries, no CF 525 issues)
-          SOLANA_VERSION=v1.18.11
-          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
-          URL="https://release.solana.com/${SOLANA_VERSION}/${ARCHIVE}"
+        # Install Solana CLI from APT
+        sudo apt-get update
+        sudo apt-get install -y wget gnupg
+        wget -qO - https://docs.solana.com/cli/install-solana-cli-tools/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/solana-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/solana-archive-keyring.gpg] https://cli.solana.com/stable/debian all main" | sudo tee /etc/apt/sources.list.d/solana.list
+        sudo apt-get update
+        sudo apt-get install -y solana-cli
+        solana --version
 
-          echo "⏬ downloading $URL"
-          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
-          tar -xjf $ARCHIVE
-          export PATH="$PWD/solana-release/bin:$PATH"
-          solana --version
+        EXPECTED=$(solana-keygen pubkey program-keypair.json)
+        LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/programs/futurity/src/lib.rs)
+        TOML=$(grep -A2 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
 
-          # 3️⃣  validate ID matches lib.rs and Anchor.toml
-          EXPECTED=$(solana-keygen pubkey program-keypair.json)
-          LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/programs/futurity/src/lib.rs)
-          TOML=$(grep -A2 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
+        echo "Keypair : $EXPECTED"
+        echo "lib.rs  : $LIB_RS"
+        echo "Anchor  : $TOML"
 
-          echo "Keypair : $EXPECTED"
-          echo "lib.rs  : $LIB_RS"
-          echo "Anchor  : $TOML"
-
-          [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
-            echo '❌ Program ID mismatch – aborting'; exit 1; }
+        [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
+          echo '❌ Program ID mismatch – aborting'; exit 1; }
 
 #####################################################################
 # 2️⃣  BUILD  – deterministic Anchor build
