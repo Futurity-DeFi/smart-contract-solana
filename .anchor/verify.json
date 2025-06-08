@@ -2,7 +2,7 @@
   "docker_image": "solanafoundation/anchor:v0.31.1",
   "programs": [
     {
-      "id": "4JymiKAgXGDinoddnmUKqNZ2YvQiwkJ53iCM1jyoa3Fe",
+      "id": "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP",
       "lib_name": "futurity",
       "sha256": "dc3dd0ab953716ede01883b8b2081d7fb7dc3ad81a69f216321fcf03d21e1b7d"
     }
