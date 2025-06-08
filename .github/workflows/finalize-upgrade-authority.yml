@@ -1,0 +1,94 @@
+name: Finalize program — remove upgrade authority
+
+# ───────────── trigger manually only ─────────────
+on:
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: "Which cluster?"
+        type: choice
+        required: true
+        default: devnet
+        options: [devnet, mainnet]
+      confirm:
+        description: "Type FINALIZE to confirm this **irreversible** action"
+        required: true
+      program_id:
+        description: "Program ID (leave empty to use default)"
+        required: false
+        default: ""
+
+env:
+  SOLANA_VERSION: 1.18.26
+  DEVNET_URL:   https://api.devnet.solana.com
+  MAINNET_URL:  https://api.mainnet-beta.solana.com
+
+  # default program you usually deploy
+  DEFAULT_PROGRAM_PUBKEY: G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Safety check input
+        run: |
+          [[ "${{ github.event.inputs.confirm }}" == "FINALIZE" ]] || {
+            echo "::error::You must type FINALIZE to continue"; exit 1; }
+
+      # ───── install / cache Solana CLI tarball ─────
+      - uses: actions/cache@v4
+        id: solcache
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Download CLI (if cache miss)
+        if: steps.solcache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCH=solana-release-x86_64-unknown-linux-gnu.tar.bz2
+          curl -L -o $ARCH \
+            https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCH}
+          tar -xjf $ARCH
+
+      - name: Add CLI to PATH
+        run: echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+
+      # ───── restore deploy keypair (current upgrade authority) ─────
+      - name: Restore deploy keypair
+        shell: bash
+        run: |
+          printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}' > deployer.json
+          chmod 600 deployer.json
+          echo "Deployer pubkey: $(solana-keygen pubkey deployer.json)"
+
+      # ───── set cluster URL + program ID ─────
+      - id: context
+        shell: bash
+        run: |
+          if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
+            URL=${{ env.MAINNET_URL }}
+          else
+            URL=${{ env.DEVNET_URL }}
+          fi
+          ID="${{ github.event.inputs.program_id || env.DEFAULT_PROGRAM_PUBKEY }}"
+          echo "url=$URL"  >> $GITHUB_OUTPUT
+          echo "program=$ID" >> $GITHUB_OUTPUT
+
+      # ───── perform irreversible finalize! ─────
+      - name: Remove upgrade authority
+        shell: bash
+        run: |
+          solana config set --url ${{ steps.context.outputs.url }} --keypair deployer.json
+          solana program set-upgrade-authority \
+            ${{ steps.context.outputs.program }} \
+            --new-upgrade-authority null
+
+      # (optional) show final authority to prove it’s done
+      - name: Show program info
+        run: |
+          solana program show ${{ steps.context.outputs.program }} \
+            --url ${{ steps.context.outputs.url }}
