@@ -28,11 +28,11 @@ jobs:
           printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
           chmod 600 program-keypair.json
 
-          # Install Solana CLI from APT
+          # Robust Solana CLI install (Bookworm repo works on Ubuntu 24.04 “noble”)
           sudo apt-get update
-          sudo apt-get install -y wget gnupg
-          wget -qO - https://docs.solana.com/cli/install-solana-cli-tools/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/solana-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/solana-archive-keyring.gpg] https://cli.solana.com/stable/debian all main" | sudo tee /etc/apt/sources.list.d/solana.list
+          sudo apt-get install -y wget gnupg ca-certificates
+          wget -qO - https://cli.solana.com/apt/solana-archive-keyring.gpg | sudo tee /usr/share/keyrings/solana-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/solana-archive-keyring.gpg] https://cli.solana.com/apt stable main" | sudo tee /etc/apt/sources.list.d/solana.list
           sudo apt-get update
           sudo apt-get install -y solana-cli
           solana --version
