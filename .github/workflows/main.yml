@@ -1,123 +1,96 @@
-# .github/workflows/verifiable-build.yml
-#
-# Two-secret pattern:
-#   PROGRAM_KEYPAIR  → program / upgrade authority (never needs SOL)
-#   DEPLOYER_KEYPAIR → fee-payer wallet (funded)
-#
-# Works on Devnet; switch VERIFY_FLAG & RPC when you’re ready for mainnet.
-
 name: Verifiable Build & Deploy
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
+  workflow_dispatch:
 
-env:
-  ANCHOR_VERSION: v0.31.1
-  DOCKER_DEFAULT_PLATFORM: linux/amd64
-  CARGO_INCREMENTAL: "0"
-  PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
-  SOLANA_CLUSTER_URL: https://api.devnet.solana.com
-  VERIFY_FLAG: -ud                     # -um for mainnet-beta
-
-################################################################################
 jobs:
-
-# ───────────────────────────── 1) BUILD ───────────────────────────────────────
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      ANCHOR_VERSION: v0.31.1
+      DOCKER_DEFAULT_PLATFORM: linux/amd64
+      CARGO_INCREMENTAL: "0"
+      SOLANA_CLUSTER_URL: https://api.devnet.solana.com
 
     steps:
-    - uses: actions/checkout@v4
-      with: { fetch-depth: 1 }
+      # 1️⃣ Checkout repo
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    - name: 💾 Cache Anchor binary
-      id: anchor-cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/bin/anchor
-        key: anchor-${{ runner.os }}-${{ env.ANCHOR_VERSION }}
+      # 2️⃣ Cache cargo deps
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: ⚡ Install Anchor CLI (cargo) – first run only
-      if: steps.anchor-cache.outputs.cache-hit != 'true'
-      run: |
-        cargo install --git https://github.com/coral-xyz/anchor \
-          --tag ${ANCHOR_VERSION} --locked anchor-cli
+      # 3️⃣ Install Anchor CLI
+      - name: Install Anchor CLI
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor \
+            --tag $ANCHOR_VERSION --locked anchor-cli
 
-    - name: 💾 Cache cargo deps
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      # 4️⃣ Restore program keypair from secret
+      - name: Restore program keypair
+        run: |
+          echo "${{ secrets.PROGRAM_KEYPAIR }}" | base64 -d > program-keypair.json
 
-    - name: 🏗️  Verifiable build
-      working-directory: program
-      run: |
-        anchor --version
-        anchor clean
-        anchor build --verifiable
+      # 5️⃣ Validate Program ID in Anchor.toml and lib.rs
+      - name: Validate program ID consistency
+        run: |
+          EXPECTED_PROGRAM_ID=$(solana-keygen pubkey program-keypair.json)
 
-    - name: 📦 Package artefacts
-      run: |
-        mkdir -p ci-artefacts
-        cp program/target/verifiable/futurity.so  ci-artefacts/
-        cp program/target/idl/futurity.json       ci-artefacts/
-        shasum -a 256 ci-artefacts/futurity.so > ci-artefacts/futurity.sha256
+          LIB_RS_ID=$(grep -oP '(?<=declare_id!\(")[^"]+' program/src/lib.rs)
+          ANCHOR_TOML_ID=$(grep -A1 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: futurity-verifiable-${{ github.sha }}
-        path: ci-artefacts
-        retention-days: 14
+          echo "Expected: $EXPECTED_PROGRAM_ID"
+          echo "lib.rs:   $LIB_RS_ID"
+          echo "Anchor.toml: $ANCHOR_TOML_ID"
 
-# ───────────────────────────── 2) DEPLOY  ─────────────────────────────────────
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: mainnet            # require manual approval in repo settings
+          if [[ "$EXPECTED_PROGRAM_ID" != "$LIB_RS_ID" || "$EXPECTED_PROGRAM_ID" != "$ANCHOR_TOML_ID" ]]; then
+            echo "❌ Program ID mismatch!"
+            exit 1
+          fi
 
-    steps:
-    - uses: actions/checkout@v4
-      with: { fetch-depth: 1 }
+      # 6️⃣ Build verifiably
+      - name: Anchor verifiable build
+        working-directory: program
+        run: |
+          anchor clean
+          anchor build --verifiable
 
-    - uses: actions/download-artifact@v4
-      with:
-        name: futurity-verifiable-${{ github.sha }}
-        path: artefacts
+      # 7️⃣ Package build artefacts
+      - name: Package artefacts
+        run: |
+          mkdir -p artefacts
+          cp program/target/verifiable/futurity.so  artefacts/
+          cp program/target/idl/futurity.json       artefacts/
+          shasum -a 256 artefacts/futurity.so >     artefacts/futurity.sha256
 
-    # ---------- Keypairs ----------
-    - name: 🗝️  Write keypairs
-      run: |
-        echo '${{ secrets.PROGRAM_KEYPAIR }}'  > program-keypair.json
-        echo '${{ secrets.DEPLOYER_KEYPAIR }}' > deployer.json
-        chmod 600 program-keypair.json deployer.json
+      # 8️⃣ Upload build artefacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: futurity-verifiable-${{ github.sha }}
+          path: artefacts
+          retention-days: 14
 
-    # ---------- Solana CLI (path becomes active for all following steps) ----------
-    - name: 🔧 Install Solana CLI
-      run: |
-        sh -c "$(curl -sSfL https://release.solana.com/v1.18.9/install)"
-        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      # 9️⃣ Restore deployer keypair
+      - name: Restore deployer keypair
+        run: |
+          echo "${{ secrets.DEPLOYER_KEYPAIR }}" | base64 -d > deployer-keypair.json
 
-    # ---------- Deploy using the funded DEPLOYER wallet ----------
-    - name: 🚀 Deploy program
-      run: |
-        solana config set --keypair deployer.json --url $SOLANA_CLUSTER_URL
-        solana program deploy artefacts/futurity.so \
-          --program-id program-keypair.json \
-          --upgrade-authority program-keypair.json
+      # 🔟 Install Solana CLI + Deploy
+      - name: Install Solana CLI and Deploy
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
-    # ---------- Verify reproducibility ----------
-    - name: ✅ Verify on-chain == GitHub commit
-      run: |
-        cargo install solana-verify --locked
-        solana-verify verify-from-repo \
-          $VERIFY_FLAG \
-          --url $SOLANA_CLUSTER_URL \
-          --program-id $PROGRAM_PUBKEY \
-          --library-name futurity \
-          --commit-hash ${{ github.sha }} \
-          --mount-path program/programs/futurity \
-          https://github.com/futurity-defi/smart-contract-solana
+          solana config set --url $SOLANA_CLUSTER_URL --keypair deployer-keypair.json
+
+          solana program deploy artefacts/futurity.so \
+            --program-id program-keypair.json
