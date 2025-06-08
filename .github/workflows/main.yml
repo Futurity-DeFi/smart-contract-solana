@@ -1,0 +1,226 @@
+name: Futurity • Pre-check → Build → Deploy → Verify
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ANCHOR_VERSION: v0.31.1
+  SOLANA_VERSION: 1.18.26              # Set to latest you want!
+  DOCKER_DEFAULT_PLATFORM: linux/amd64
+  CARGO_INCREMENTAL: "0"
+  SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # CHANGE for mainnet-beta
+  PROGRAM_PUBKEY: G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a
+
+jobs:
+###############################################################################
+# 1️⃣ PRE-CHECK: Validate Program ID everywhere (cache + install Solana CLI)
+###############################################################################
+  precheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      - name: Restore program keypair & validate Program ID
+        shell: bash
+        run: |
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+          chmod 600 program-keypair.json
+
+          EXPECTED=$(solana-keygen pubkey program-keypair.json)
+          LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/programs/futurity/src/lib.rs)
+          TOML=$(grep -A2 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
+
+          echo "Keypair : $EXPECTED"
+          echo "lib.rs  : $LIB_RS"
+          echo "Anchor  : $TOML"
+
+          [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
+            echo '❌ Program ID mismatch – aborting'; exit 1; }
+
+###############################################################################
+# 2️⃣ BUILD: Deterministic Anchor build, cache Anchor CLI
+###############################################################################
+  build:
+    needs: precheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      # Cache Anchor CLI binary
+      - name: Cache Anchor CLI
+        id: anchor-binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/anchor
+          key: anchor-${{ runner.os }}-${{ env.ANCHOR_VERSION }}
+
+      - name: Install Anchor CLI (only if cache miss)
+        if: steps.anchor-binary.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor \
+            --tag $ANCHOR_VERSION --locked anchor-cli
+
+      # Cache cargo deps
+      - name: Cache Cargo deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Anchor verifiable build
+        working-directory: program
+        run: |
+          anchor clean
+          anchor build --verifiable
+
+      - name: Package artefacts
+        run: |
+          mkdir -p artefacts
+          cp program/target/verifiable/futurity.so artefacts/
+          cp program/target/idl/futurity.json      artefacts/
+          shasum -a 256 artefacts/futurity.so >    artefacts/futurity.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: futurity-${{ github.sha }}
+          path: artefacts
+          retention-days: 14
+
+###############################################################################
+# 3️⃣ DEPLOY: use DEPLOY_KEYPAIR for fee payer, PROGRAM_KEYPAIR for program ID
+###############################################################################
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: mainnet
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: futurity-${{ github.sha }}
+          path: artefacts
+
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      - name: Restore keypairs
+        run: |
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+          printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}'  > deploy-keypair.json
+          chmod 600 program-keypair.json deploy-keypair.json
+
+      - name: Deploy program
+        run: |
+          solana config set --url $SOLANA_CLUSTER_URL --keypair deploy-keypair.json
+          solana program deploy artefacts/futurity.so \
+            --program-id program-keypair.json \
+            --upgrade-authority program-keypair.json
+
+###############################################################################
+# 4️⃣ VERIFY: check on-chain program == build for this commit
+###############################################################################
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      # Cache solana-verify CLI
+      - name: Cache solana-verify
+        id: verify-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/solana-verify
+          key: solana-verify-${{ runner.os }}-0.4.0
+
+      - name: Install solana-verify (compile if needed)
+        if: steps.verify-bin.outputs.cache-hit != 'true'
+        run: cargo install solana-verify --locked
+
+      - name: Verify deterministic build
+        run: |
+          solana-verify verify-from-repo \
+            --url $SOLANA_CLUSTER_URL \
+            --program-id $PROGRAM_PUBKEY \
+            --library-name futurity \
+            --commit-hash ${{ github.sha }} \
+            --mount-path program/programs/futurity \
+            https://github.com/${{ github.repository }}

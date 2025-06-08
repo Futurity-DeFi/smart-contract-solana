@@ -1,0 +1,23 @@
+[features]
+resolution = true
+skip-lint = false
+seeds = false
+
+[programs.localnet]
+futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+
+[programs.devnet]
+futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+
+[programs.mainnet]
+futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test-bpf -- --nocapture"
