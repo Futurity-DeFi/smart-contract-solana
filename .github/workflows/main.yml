@@ -22,30 +22,35 @@ jobs:
       - uses: actions/checkout@v4
         with: {fetch-depth: 1}
 
-      # 🔧 Install Solana CLI + validate IDs in ONE step
-      - name: 🗝️  Restore keypair & Validate Program ID
+      - name: Restore program keypair & validate Program ID
         shell: bash
         run: |
-          # 1. restore PROGRAM_KEYPAIR
-          echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+          # 1️⃣  restore PROGRAM_KEYPAIR (raw JSON secret)
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
           chmod 600 program-keypair.json
 
-          # 2. install Solana CLI
-          curl -sSfL https://release.solana.com/v1.18.11/install | bash -s --
-          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          # 2️⃣  install Solana CLI (robust: archive + retries, no CF 525 issues)
+          SOLANA_VERSION=v1.18.11
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://release.solana.com/${SOLANA_VERSION}/${ARCHIVE}"
 
-          # 3. run validation
+          echo "⏬ downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+          export PATH="$PWD/solana-release/bin:$PATH"
+          solana --version
+
+          # 3️⃣  validate ID matches lib.rs and Anchor.toml
           EXPECTED=$(solana-keygen pubkey program-keypair.json)
-          LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/src/lib.rs)
-          TOML=$(grep -A1 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
+          LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/programs/futurity/src/lib.rs)
+          TOML=$(grep -A2 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
 
           echo "Keypair : $EXPECTED"
           echo "lib.rs  : $LIB_RS"
           echo "Anchor  : $TOML"
 
           [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
-            echo "❌ Program ID mismatch – aborting.";
-            exit 1; }
+            echo '❌ Program ID mismatch – aborting'; exit 1; }
 
 #####################################################################
 # 2️⃣  BUILD  – deterministic Anchor build
