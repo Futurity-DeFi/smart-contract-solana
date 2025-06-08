@@ -13,11 +13,8 @@ env:
   SOLANA_CLUSTER_URL: https://api.devnet.solana.com
   # -ud  = devnet,  -um = mainnet-beta
   VERIFY_FLAG: -ud
-  PROGRAM_PUBKEY: 2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP
+  PROGRAM_PUBKEY: 6MzVX4hQAmh18RSYt2u9LYC2ju2t8LdavfP5jtAgzCje
 
-#####################################################################
-# 1️⃣  PRE-CHECK  – fail fast if IDs don’t match
-#####################################################################
 jobs:
   precheck:
     runs-on: ubuntu-latest
@@ -25,27 +22,30 @@ jobs:
       - uses: actions/checkout@v4
         with: {fetch-depth: 1}
 
-      - name: 🗝️  Restore PROGRAM_KEYPAIR
+      # 🔧 Install Solana CLI + validate IDs in ONE step
+      - name: 🗝️  Restore keypair & Validate Program ID
+        shell: bash
         run: |
+          # 1. restore PROGRAM_KEYPAIR
           echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
           chmod 600 program-keypair.json
 
-      - name: 🔧 Install Solana CLI (quick)
-        run: |
-          sh -c "$(curl -sSfL https://release.solana.com/v1.18.11/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          # 2. install Solana CLI
+          curl -sSfL https://release.solana.com/v1.18.11/install | bash -s --
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
-      - name: ✅ Validate Program ID consistency
-        shell: bash
-        run: |
+          # 3. run validation
           EXPECTED=$(solana-keygen pubkey program-keypair.json)
           LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/src/lib.rs)
           TOML=$(grep -A1 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
+
           echo "Keypair : $EXPECTED"
           echo "lib.rs  : $LIB_RS"
           echo "Anchor  : $TOML"
+
           [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
-            echo "❌ Program ID mismatch – aborting."; exit 1; }
+            echo "❌ Program ID mismatch – aborting.";
+            exit 1; }
 
 #####################################################################
 # 2️⃣  BUILD  – deterministic Anchor build
