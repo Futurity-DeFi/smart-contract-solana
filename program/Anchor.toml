@@ -1,13 +1,12 @@
-[toolchain]
-
 [features]
 resolution = true
 skip-lint = false
-
-[programs.devnet]
-futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
+seeds = false
 
 [programs.localnet]
+futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
+
+[programs.devnet]
 futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
 
 [programs.mainnet]
@@ -19,9 +18,6 @@ url = "https://api.apr.dev"
 [provider]
 cluster = "devnet"
 wallet = "~/.config/solana/id.json"
-
-[workspace]
-members = ["program"]
 
 [scripts]
 test = "cargo test-bpf -- --nocapture"

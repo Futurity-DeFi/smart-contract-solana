@@ -72,12 +72,6 @@ This will spin up a local validator, build, deploy, and execute all tests in `pr
 
 ## Deploying
 
-Before you deploy, copy the asset to the top level directory target subdirectory.
-
-```bash
-cp program/target/deploy/futurity.so target/deploy/.
-```
-
 To deploy to a cluster (e.g., devnet):
 
 ```bash
