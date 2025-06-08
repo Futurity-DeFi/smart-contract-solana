@@ -1,0 +1,53 @@
+name: Verifiable Build
+
+on:
+  push:
+    branches: [main]        # or whatever branch you deploy from
+  workflow_dispatch:        # lets you trigger it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest   # GitHub-hosted runner has Docker pre-installed
+    env:
+      # Force x86 Docker so builds match OtterSec’s SVB images
+      DOCKER_DEFAULT_PLATFORM: linux/amd64
+      # Speed up cargo with incremental compiler artifacts
+      CARGO_INCREMENTAL: "0"
+
+    steps:
+      # 1️⃣ Checkout reproducibly
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # 2️⃣ Optional: cache cargo registry + git deps (cuts build time ~70 %)
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # 3️⃣ Install Anchor CLI (matches your local v0.31.1)
+      - name: Install Anchor
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor \
+            --tag v0.31.1 --locked anchor-cli
+
+      # 4️⃣ Run the deterministic build **inside** Anchor’s verifiable Docker
+      - name: Verifiable build
+        run: |
+          anchor clean
+          anchor build --verifiable
+          mkdir -p ci-artefacts
+          cp target/verifiable/futurity.so             ci-artefacts/
+          cp target/idl/futurity.json                  ci-artefacts/
+          shasum -a 256 ci-artefacts/futurity.so  >    ci-artefacts/futurity.sha256
+
+      # 5️⃣ Publish artefacts so you can `curl` them from any machine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: futurity-verifiable-${{ github.sha }}
+          path: ci-artefacts
+          retention-days: 14   # keep for two weeks
