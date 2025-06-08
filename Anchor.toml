@@ -5,13 +5,13 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-futurity = "4JymiKAgXGDinoddnmUKqNZ2YvQiwkJ53iCM1jyoa3Fe"
+futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
 
 [programs.localnet]
-futurity = "4JymiKAgXGDinoddnmUKqNZ2YvQiwkJ53iCM1jyoa3Fe"
+futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
 
 [programs.mainnet]
-futurity = "4JymiKAgXGDinoddnmUKqNZ2YvQiwkJ53iCM1jyoa3Fe"
+futurity = "2PswCESR7U3MF9CL3B89qQFnJ9tac6ucGVQR3Zm7xeGP"
 
 [registry]
 url = "https://api.apr.dev"
