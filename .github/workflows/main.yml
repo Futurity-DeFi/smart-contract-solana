@@ -27,7 +27,7 @@ jobs:
 
       - name: 🗝️  Restore PROGRAM_KEYPAIR
         run: |
-          echo '${{ secrets.PROGRAM_KEYPAIR }}' | base64 -d > program-keypair.json
+          echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
           chmod 600 program-keypair.json
 
       - name: 🔧 Install Solana CLI (quick)
@@ -123,8 +123,8 @@ jobs:
       # ---- Restore keypairs ----
       - name: 🗝️  Restore keypairs
         run: |
-          echo '${{ secrets.PROGRAM_KEYPAIR }}' | base64 -d > program-keypair.json
-          echo '${{ secrets.DEPLOY_KEYPAIR }}'  | base64 -d > deploy-keypair.json
+          echo '${{ secrets.PROGRAM_KEYPAIR }}' > program-keypair.json
+          echo '${{ secrets.DEPLOY_KEYPAIR }}'  > deploy-keypair.json
           chmod 600 program-keypair.json deploy-keypair.json
 
       # ---- Install Solana CLI ----
