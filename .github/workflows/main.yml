@@ -318,3 +318,125 @@ jobs:
             --program-id ${{ env.PROGRAM_PUBKEY }} \
             --library-name futurity \
             --remote
+
+###############################################################################
+# 6️⃣ FINALIZE UPGRADE AUTHORITY: Manual irreversible removal of upgrade authority
+###############################################################################
+  finalize-upgrade-authority:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [verify]
+    environment:
+      name: ${{ github.event.inputs.cluster == 'mainnet' && 'mainnet' || 'devnet' }}
+      url: ${{ github.event.inputs.cluster == 'mainnet' && format('https://explorer.solana.com/address/{0}?cluster=mainnet-beta', env.PROGRAM_PUBKEY) || format('https://explorer.solana.com/address/{0}?cluster=devnet', env.PROGRAM_PUBKEY) }}
+    permissions:
+      contents: read
+    steps:
+      # ───── guardrail ─────────────────────────────────────────────────
+      - name: Safety confirmation
+        if: github.event.inputs.confirm != null
+        run: |
+          [[ "${{ github.event.inputs.confirm }}" == "FINALIZE" ]] || {
+            echo "::error::You must type FINALIZE"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      # ───── restore deploy keypair (current authority) ───────────────
+      - name: Restore deployer keypair
+        run: |
+          if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
+            printf '%s' '${{ secrets.DEPLOY_KEYPAIR_MAINNET }}' > deployer.json
+          else
+            printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}' > deployer.json
+          fi
+          chmod 600 deployer.json
+          echo "Deployer pubkey: $(solana-keygen pubkey deployer.json)"
+
+      # ───── choose cluster & program ID ───────────────────────────────
+      - id: ctx
+        shell: bash
+        run: |
+          if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
+            URL=https://api.mainnet-beta.solana.com
+            DEFAULT_ID=${{ env.PROGRAM_PUBKEY }}
+          else
+            URL=https://api.devnet.solana.com
+            DEFAULT_ID=${{ env.PROGRAM_PUBKEY }}
+          fi
+          PROG="${{ github.event.inputs.program_id }}"
+          [[ -z "$PROG" ]] && PROG=$DEFAULT_ID
+          echo "url=$URL"     >> $GITHUB_OUTPUT
+          echo "program=$PROG" >> $GITHUB_OUTPUT
+          echo "Cluster URL : $URL"
+          echo "Program ID  : $PROG"
+
+      # ───── ensure program exists — fail immediately if not ──────────
+      - name: Check program account exists
+        env:
+          URL: ${{ steps.ctx.outputs.url }}
+          PID: ${{ steps.ctx.outputs.program }}
+        run: |
+          set -e
+          solana program show "$PID" --url "$URL" >/dev/null 2>&1 || {
+            echo "::error::Program $PID not found on cluster"; exit 1; }
+          echo "✅ Program account found."
+
+      # ───── irreversible finalize ─────────────────────────────────────
+      - name: Remove upgrade authority
+        env:
+          URL: ${{ steps.ctx.outputs.url }}
+          PID: ${{ steps.ctx.outputs.program }}
+        run: |
+          solana config set --url "$URL" --keypair deployer.json
+          solana program set-upgrade-authority "$PID" \
+            --new-upgrade-authority null
+          echo "✔️  Upgrade authority set to null."
+
+      # ───── show final state ──────────────────────────────────────────
+      - name: Show program info
+        env:
+          URL: ${{ steps.ctx.outputs.url }}
+          PID: ${{ steps.ctx.outputs.program }}
+        run: solana program show "$PID" --url "$URL"
+
+    # Manual trigger with inputs
+    workflow_dispatch:
+      inputs:
+        cluster:
+          description: "Cluster to finalize"
+          type: choice
+          required: true
+          default: devnet
+          options: [devnet, mainnet]
+        confirm:
+          description: "Type FINALIZE to confirm this irreversible action"
+          required: true
+        program_id:
+          description: "Override program ID (blank ⇒ cluster default)"
+          required: false
+          default: ""
