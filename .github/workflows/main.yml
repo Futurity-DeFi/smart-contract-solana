@@ -275,8 +275,13 @@ jobs:
             --solana-version ${SOLANA_VERSION} \
             https://github.com/${{ github.repository }} \
             > verify.log 2>&1
-          grep -q "Verification succeeded" verify.log || { cat verify.log; exit 1; }
-          echo "✅ Devnet verification passed."
+          cat verify.log
+          if grep -q "Verification succeeded" verify.log; then
+            echo "✅ Devnet verification passed."
+          else
+            echo "❌ Devnet verification failed. See log above." >&2
+            exit 1
+          fi
 
 ###############################################################################
 # 5️⃣ MAINNET DEPLOY (manual gate)
