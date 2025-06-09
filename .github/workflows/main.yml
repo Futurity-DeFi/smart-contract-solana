@@ -137,9 +137,18 @@ jobs:
             ~/.cargo/git
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build SBF
+      - name: Cache solana-verify
+        id: verifybin
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/solana-verify
+          key: solverify-${{ runner.os }}-0.4.0
+      - if: steps.verifybin.outputs.cache-hit != 'true'
+        run: cargo install solana-verify --version 0.4.0 --locked
+
+      - name: Build SBF (verifiable)
         working-directory: program
-        run: cargo build-sbf
+        run: solana-verify build
 
       - name: Package artefacts
         run: |
@@ -262,7 +271,7 @@ jobs:
           path: ~/.cargo/bin/solana-verify
           key: solverify-${{ runner.os }}-0.4.0
       - if: steps.verifybin.outputs.cache-hit != 'true'
-        run: cargo install solana-verify --locked
+        run: cargo install solana-verify --version 0.4.0 --locked
 
       - name: Deterministic verify (Devnet)
         run: |
