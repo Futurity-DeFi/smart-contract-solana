@@ -223,7 +223,15 @@ jobs:
             --library-name futurity \
             --commit-hash ${{ github.sha }} \
             --mount-path program/programs/futurity \
-            https://github.com/${{ github.repository }}
+            https://github.com/${{ github.repository }} > verify.log 2>&1
+
+          if grep -q "Verification succeeded" verify.log; then
+            echo "✅ Verification passed."
+          else
+            echo "❌ Verification failed. See details below:"
+            cat verify.log
+            exit 1
+          fi
 
 ###############################################################################
 # 5️⃣ MAINNET DEPLOY: Manual gate, deploy, verify, publish IDL, remove upgrade authority
@@ -240,7 +248,7 @@ jobs:
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}
           approvers: ${{ github.actor }}
-          instructions: |
+          issue-body: |
             Please ensure the deployer wallet is funded for mainnet deployment. You can check the balance with:
             solana balance ${{ secrets.DEPLOY_KEYPAIR_MAINNET }} --url https://api.mainnet-beta.solana.com
 
