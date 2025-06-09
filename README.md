@@ -40,7 +40,7 @@ Ensure you have a local validator or devnet access for testing/deployment.
 From the repository root, run:
 
 ```bash
-cargo build-bpf
+cargo build-sbf
 ```
 
 This will compile the program and output artifacts to `program/target/deploy`.
@@ -50,7 +50,7 @@ This will compile the program and output artifacts to `program/target/deploy`.
 To run the program’s tests (including edge cases and fuzzing):
 
 ```bash
-cargo test-bpf
+cargo test-sbf
 ```
 
 This will run any Rust-based tests using `solana-program-test`.
