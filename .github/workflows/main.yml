@@ -224,3 +224,97 @@ jobs:
             --commit-hash ${{ github.sha }} \
             --mount-path program/programs/futurity \
             https://github.com/${{ github.repository }}
+
+###############################################################################
+# 5️⃣ MAINNET DEPLOY: Manual gate, deploy, verify, publish IDL, remove upgrade authority
+###############################################################################
+  mainnet-deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: mainnet
+      url: https://explorer.solana.com/address/${{ env.PROGRAM_PUBKEY }}?cluster=mainnet-beta
+    steps:
+      - name: Manual approval & fund check
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: ${{ github.actor }}
+          instructions: |
+            Please ensure the deployer wallet is funded for mainnet deployment. You can check the balance with:
+            solana balance ${{ secrets.DEPLOY_KEYPAIR_MAINNET }} --url https://api.mainnet-beta.solana.com
+
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: futurity-${{ github.sha }}
+          path: artefacts
+
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      - name: Restore keypairs (mainnet)
+        run: |
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR_MAINNET }}' > program-keypair-mainnet.json
+          printf '%s' '${{ secrets.DEPLOY_KEYPAIR_MAINNET }}'  > deploy-keypair-mainnet.json
+          chmod 600 program-keypair-mainnet.json deploy-keypair-mainnet.json
+
+      - name: Deploy program to mainnet
+        run: |
+          solana config set --url https://api.mainnet-beta.solana.com --keypair deploy-keypair-mainnet.json
+          solana program deploy artefacts/futurity.so \
+            --program-id program-keypair-mainnet.json \
+            --upgrade-authority program-keypair-mainnet.json
+
+      - name: Publish IDL to mainnet
+        run: |
+          anchor idl upgrade --provider.cluster mainnet \
+            --filepath artefacts/futurity.json \
+            ${{ env.PROGRAM_PUBKEY }}
+
+      - name: Remove upgrade authority (best practice)
+        run: |
+          solana program set-upgrade-authority ${{ env.PROGRAM_PUBKEY }} \
+            --new-upgrade-authority 11111111111111111111111111111111 \
+            --keypair deploy-keypair-mainnet.json
+
+      - name: Standard verify on mainnet
+        run: |
+          solana-verify verify-from-repo \
+            --url https://api.mainnet-beta.solana.com \
+            --program-id ${{ env.PROGRAM_PUBKEY }} \
+            --library-name futurity \
+            --commit-hash ${{ github.sha }} \
+            --mount-path program/programs/futurity \
+            https://github.com/${{ github.repository }}
+
+      - name: OtterSec remote verify
+        run: |
+          solana-verify verify \
+            --url https://api.mainnet-beta.solana.com \
+            --program-id ${{ env.PROGRAM_PUBKEY }} \
+            --library-name futurity \
+            --remote
