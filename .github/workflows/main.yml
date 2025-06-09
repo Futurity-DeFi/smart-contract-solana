@@ -68,6 +68,7 @@ jobs:
               "https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}/${ARCH}"
             tar -xjf $ARCH
           fi
+          export PATH="$PWD/solana-release/bin:$PATH"
           echo "$PWD/solana-release/bin" >> "$GITHUB_PATH"
           solana --version
           SH
