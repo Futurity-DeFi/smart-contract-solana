@@ -275,7 +275,7 @@ jobs:
             --mount-path $MOUNT_PATH \
             --solana-version ${SOLANA_VERSION} \
             https://github.com/${{ github.repository }} \
-            > verify.log 2>&1"
+            > verify.log"
           solana-verify verify-from-repo \
             --url $DEVNET_URL \
             --program-id $PROGRAM_PUBKEY \
@@ -284,7 +284,7 @@ jobs:
             --mount-path $MOUNT_PATH \
             --solana-version ${SOLANA_VERSION} \
             https://github.com/${{ github.repository }} \
-            > verify.log 2>&1
+            > verify.log
           ls -l verify.log || echo "verify.log not found"
           pwd
           cat verify.log || echo "verify.log is empty"
