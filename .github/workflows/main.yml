@@ -20,7 +20,6 @@ on:
         default: ""
 
 env:
-  ANCHOR_VERSION: v0.31.1
   SOLANA_VERSION: 2.2.15-jito
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
@@ -68,18 +67,14 @@ jobs:
           chmod 600 program-keypair.json
 
           EXPECTED=$(solana-keygen pubkey program-keypair.json)
-          LIB_RS=$(grep -oP '(?<=declare_id!\(")[^"]+' program/programs/futurity/src/lib.rs)
-          TOML=$(grep -A2 '\[programs\.devnet\]' program/Anchor.toml | grep -oP '(?<=futurity = ")[^"]+')
+          echo "Keypair  : $EXPECTED"
+          echo "Expected : $PROGRAM_PUBKEY"
 
-          echo "Keypair : $EXPECTED"
-          echo "lib.rs  : $LIB_RS"
-          echo "Anchor  : $TOML"
-
-          [[ "$EXPECTED" == "$LIB_RS" && "$EXPECTED" == "$TOML" ]] || {
+          [[ "$EXPECTED" == "$PROGRAM_PUBKEY" ]] || {
             echo '❌ Program ID mismatch – aborting'; exit 1; }
 
 ###############################################################################
-# 2️⃣ BUILD: Deterministic Anchor build, cache Anchor CLI
+# 2️⃣ BUILD: Compile program to BPF
 ###############################################################################
   build:
     needs: precheck
@@ -87,20 +82,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 1}
-
-      # Cache Anchor CLI binary
-      - name: Cache Anchor CLI
-        id: anchor-binary
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/anchor
-          key: anchor-${{ runner.os }}-${{ env.ANCHOR_VERSION }}
-
-      - name: Install Anchor CLI (only if cache miss)
-        if: steps.anchor-binary.outputs.cache-hit != 'true'
-        run: |
-          cargo install --git https://github.com/coral-xyz/anchor \
-            --tag $ANCHOR_VERSION --locked anchor-cli
 
       # Cache cargo deps
       - name: Cache Cargo deps
@@ -111,18 +92,16 @@ jobs:
             ~/.cargo/git
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Anchor verifiable build
+      - name: Build BPF
         working-directory: program
         run: |
-          anchor clean
-          anchor build --verifiable
+          cargo build-bpf
 
       - name: Package artefacts
         run: |
           mkdir -p artefacts
-          cp program/target/verifiable/futurity.so artefacts/
-          cp program/target/idl/futurity.json      artefacts/
-          shasum -a 256 artefacts/futurity.so >    artefacts/futurity.sha256
+          cp program/programs/futurity/target/deploy/futurity.so artefacts/
+          shasum -a 256 artefacts/futurity.so > artefacts/futurity.sha256
 
       - uses: actions/upload-artifact@v4
         with:
@@ -311,11 +290,6 @@ jobs:
             --program-id program-keypair-mainnet.json \
             --upgrade-authority program-keypair-mainnet.json
 
-      - name: Publish IDL to mainnet
-        run: |
-          anchor idl upgrade --provider.cluster mainnet \
-            --filepath artefacts/futurity.json \
-            ${{ env.PROGRAM_PUBKEY }}
 
       - name: Remove upgrade authority (best practice)
         run: |

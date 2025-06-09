@@ -8,19 +8,17 @@ edition     = "2021"
 crate-type  = ["cdylib", "lib"]
 name        = "futurity"
 
+
 [features]
-no-entrypoint      = []
-no-idl             = []
-no-log-ix-name     = []
-cpi                = ["no-entrypoint"]
+no-entrypoint = []
 default = []
-idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [profile.release]
 overflow-checks = true
 
 [dependencies]
-anchor-lang = { version = "0.31.1", default-features = false }
-anchor-spl  = { version = "0.31.1" }
+borsh = "0.10"
+borsh-derive = "0.10"
+thiserror = "1.0"
 solana-security-txt = "1.1.1"
 solana-program = "2.2.15"
