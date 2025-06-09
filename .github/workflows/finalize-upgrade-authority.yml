@@ -1,30 +1,34 @@
 name: Finalize program — remove upgrade authority
 
-# ───────────── trigger manually only ─────────────
 on:
   workflow_dispatch:
     inputs:
       cluster:
-        description: "Which cluster?"
+        description: "Cluster to finalize"
         type: choice
         required: true
         default: devnet
         options: [devnet, mainnet]
+
       confirm:
-        description: "Type FINALIZE to confirm this **irreversible** action"
+        description: "Type FINALIZE to confirm this irreversible action"
         required: true
+
       program_id:
-        description: "Program ID (leave empty to use default)"
+        description: "Override program ID (blank ⇒ cluster default)"
         required: false
         default: ""
 
 env:
   SOLANA_VERSION: 1.18.26
+
+  # RPC endpoints
   DEVNET_URL:   https://api.devnet.solana.com
   MAINNET_URL:  https://api.mainnet-beta.solana.com
 
-  # default program you usually deploy
-  DEFAULT_PROGRAM_PUBKEY: G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a
+  # default IDs
+  DEVNET_PROGRAM_ID: G5vZC5LFoB3yFTzjHw7mF8p9yui0vGFJ8WEGP2g1a
+  MAINNET_PROGRAM_ID: G5vZC5LFoB3yFTzjHw7mF8p9yui0vGFJ8WEGP2g1a
 
 permissions:
   contents: read
@@ -33,62 +37,82 @@ jobs:
   finalize:
     runs-on: ubuntu-latest
     steps:
-      - name: Safety check input
-        run: |
-          [[ "${{ github.event.inputs.confirm }}" == "FINALIZE" ]] || {
-            echo "::error::You must type FINALIZE to continue"; exit 1; }
+    # ───── guardrail ─────────────────────────────────────────────────
+    - name: Safety confirmation
+      run: |
+        [[ "${{ github.event.inputs.confirm }}" == "FINALIZE" ]] ||
+          { echo "::error::You must type FINALIZE"; exit 1; }
 
-      # ───── install / cache Solana CLI tarball ─────
-      - uses: actions/cache@v4
-        id: solcache
-        with:
-          path: solana-release
-          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+    # ───── install / cache Solana CLI ───────────────────────────────
+    - uses: actions/cache@v4
+      id: solcache
+      with:
+        path: solana-release
+        key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
 
-      - name: Download CLI (if cache miss)
-        if: steps.solcache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          ARCH=solana-release-x86_64-unknown-linux-gnu.tar.bz2
-          curl -L -o $ARCH \
-            https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCH}
-          tar -xjf $ARCH
+    - if: steps.solcache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        ARCH=solana-release-x86_64-unknown-linux-gnu.tar.bz2
+        curl -L -o $ARCH \
+          https://github.com/solana-labs/solana/releases/download/v${SOLANA_VERSION}/${ARCH}
+        tar -xjf $ARCH
 
-      - name: Add CLI to PATH
-        run: echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+    - name: Add CLI to PATH
+      run: |
+        echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+        solana --version
 
-      # ───── restore deploy keypair (current upgrade authority) ─────
-      - name: Restore deploy keypair
-        shell: bash
-        run: |
-          printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}' > deployer.json
-          chmod 600 deployer.json
-          echo "Deployer pubkey: $(solana-keygen pubkey deployer.json)"
+    # ───── restore deploy keypair (current authority) ───────────────
+    - name: Restore deployer keypair
+      run: |
+        printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}' > deployer.json
+        chmod 600 deployer.json
+        echo "Deployer pubkey: $(solana-keygen pubkey deployer.json)"
 
-      # ───── set cluster URL + program ID ─────
-      - id: context
-        shell: bash
-        run: |
-          if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
-            URL=${{ env.MAINNET_URL }}
-          else
-            URL=${{ env.DEVNET_URL }}
-          fi
-          ID="${{ github.event.inputs.program_id || env.DEFAULT_PROGRAM_PUBKEY }}"
-          echo "url=$URL"  >> $GITHUB_OUTPUT
-          echo "program=$ID" >> $GITHUB_OUTPUT
+    # ───── choose cluster & program ID ───────────────────────────────
+    - id: ctx
+      shell: bash
+      run: |
+        if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
+          URL=${{ env.MAINNET_URL }}
+          DEFAULT_ID=${{ env.MAINNET_PROGRAM_ID }}
+        else
+          URL=${{ env.DEVNET_URL }}
+          DEFAULT_ID=${{ env.DEVNET_PROGRAM_ID }}
+        fi
+        PROG="${{ github.event.inputs.program_id }}"
+        [[ -z "$PROG" ]] && PROG=$DEFAULT_ID
+        echo "url=$URL"     >> $GITHUB_OUTPUT
+        echo "program=$PROG" >> $GITHUB_OUTPUT
+        echo "Cluster URL : $URL"
+        echo "Program ID  : $PROG"
 
-      # ───── perform irreversible finalize! ─────
-      - name: Remove upgrade authority
-        shell: bash
-        run: |
-          solana config set --url ${{ steps.context.outputs.url }} --keypair deployer.json
-          solana program set-upgrade-authority \
-            ${{ steps.context.outputs.program }} \
-            --new-upgrade-authority null
+    # ───── ensure program exists — fail immediately if not ──────────
+    - name: Check program account exists
+      env:
+        URL: ${{ steps.ctx.outputs.url }}
+        PID: ${{ steps.ctx.outputs.program }}
+      run: |
+        set -e
+        solana program show "$PID" --url "$URL" >/dev/null 2>&1 ||
+          { echo "::error::Program $PID not found on cluster"; exit 1; }
+        echo "✅ Program account found."
 
-      # (optional) show final authority to prove it’s done
-      - name: Show program info
-        run: |
-          solana program show ${{ steps.context.outputs.program }} \
-            --url ${{ steps.context.outputs.url }}
+    # ───── irreversible finalize ─────────────────────────────────────
+    - name: Remove upgrade authority
+      env:
+        URL: ${{ steps.ctx.outputs.url }}
+        PID: ${{ steps.ctx.outputs.program }}
+      run: |
+        solana config set --url "$URL" --keypair deployer.json
+        solana program set-upgrade-authority "$PID" \
+          --new-upgrade-authority null
+        echo "✔️  Upgrade authority set to null."
+
+    # ───── show final state ──────────────────────────────────────────
+    - name: Show program info
+      env:
+        URL: ${{ steps.ctx.outputs.url }}
+        PID: ${{ steps.ctx.outputs.program }}
+      run: solana program show "$PID" --url "$URL"
