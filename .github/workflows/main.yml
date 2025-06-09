@@ -74,7 +74,7 @@ jobs:
             echo '❌ Program ID mismatch – aborting'; exit 1; }
 
 ###############################################################################
-# 2️⃣ BUILD: Compile program to BPF
+# 2️⃣ BUILD: Compile program to SBF
 ###############################################################################
   build:
     needs: precheck
@@ -92,10 +92,34 @@ jobs:
             ~/.cargo/git
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build BPF
+      # Cache Solana CLI static binary
+      - name: Cache Solana CLI static binary
+        id: solana-static-cli-build
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-static-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+
+      - name: Install Solana CLI (download if cache miss)
+        if: steps.solana-static-cli-build.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          ARCHIVE="solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          URL="https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}/${ARCHIVE}"
+          echo "⏬ Downloading $URL"
+          curl -L --retry 5 --retry-delay 3 -o $ARCHIVE $URL
+          tar -xjf $ARCHIVE
+
+      - name: Add Solana CLI to PATH
+        run: |
+          export PATH="$PWD/solana-release/bin:$PATH"
+          echo "$PWD/solana-release/bin" >> $GITHUB_PATH
+          solana --version
+
+      - name: Build SBF
         working-directory: program
         run: |
-          cargo build-bpf
+          cargo build-sbf
 
       - name: Package artefacts
         run: |
