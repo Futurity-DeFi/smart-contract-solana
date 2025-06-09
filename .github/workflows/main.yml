@@ -124,7 +124,10 @@ jobs:
       - name: Package artefacts
         run: |
           mkdir -p artefacts
-          cp program/programs/futurity/target/deploy/futurity.so artefacts/
+          # The build step above runs in the `program` directory, so the
+          # compiled shared object is output to `program/target/deploy`.
+          # Copy it from there for later steps.
+          cp program/target/deploy/futurity.so artefacts/
           shasum -a 256 artefacts/futurity.so > artefacts/futurity.sha256
 
       - uses: actions/upload-artifact@v4
