@@ -346,9 +346,9 @@ jobs:
 # 6️⃣ FINALIZE UPGRADE AUTHORITY: Manual irreversible removal of upgrade authority
 ###############################################################################
   finalize-upgrade-authority:
-    if: always()
     runs-on: ubuntu-latest
-    needs: [verify]
+    needs: [verify, deploy, mainnet-deploy]
+    if: needs.verify.result == 'success' || needs.deploy.result == 'success' || needs.mainnet-deploy.result == 'success'
     environment:
       name: ${{ github.event.inputs.cluster == 'mainnet' && 'mainnet' || 'devnet' }}
       url: ${{ github.event.inputs.cluster == 'mainnet' && format('https://explorer.solana.com/address/{0}?cluster=mainnet-beta', env.PROGRAM_PUBKEY) || format('https://explorer.solana.com/address/{0}?cluster=devnet', env.PROGRAM_PUBKEY) }}
