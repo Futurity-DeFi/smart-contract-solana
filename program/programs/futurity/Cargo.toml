@@ -1,27 +1,26 @@
 [package]
 name        = "futurity"
 version     = "0.1.0"
-edition     = "2021"
 description = "FUTURITY – Engineering Financial Futures on Solana"
+edition     = "2021"
 
 [lib]
-name        = "futurity"
 crate-type  = ["cdylib", "lib"]
-
-[dependencies]
-anchor-lang = { version = "0.31.1", default-features = false }
-anchor-spl  = { version = "0.31.1" }
-solana-security-txt = "1.1.1"
+name        = "futurity"
 
 [features]
 no-entrypoint      = []
 no-idl             = []
 no-log-ix-name     = []
 cpi                = ["no-entrypoint"]
-
-idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
-
 default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [profile.release]
 overflow-checks = true
+
+[dependencies]
+anchor-lang = { version = "0.31.1", default-features = false }
+anchor-spl  = { version = "0.31.1" }
+solana-security-txt = "1.1.1"
+solana-program = "2.2.15"

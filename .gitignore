@@ -3,8 +3,10 @@
 *.key
 *.secret
 *.log
+.DS_Store
 
 # === Solana / Anchor ===
+.anchor
 target/
 docker-target/
 **/*.so
