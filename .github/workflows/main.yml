@@ -4,6 +4,20 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      cluster:
+        description: "Cluster to finalize"
+        type: choice
+        required: true
+        default: devnet
+        options: [devnet, mainnet]
+      confirm:
+        description: "Type FINALIZE to confirm this irreversible action"
+        required: true
+      program_id:
+        description: "Override program ID (blank ⇒ cluster default)"
+        required: false
+        default: ""
 
 env:
   ANCHOR_VERSION: v0.31.1
@@ -431,20 +445,3 @@ jobs:
           URL: ${{ steps.ctx.outputs.url }}
           PID: ${{ steps.ctx.outputs.program }}
         run: solana program show "$PID" --url "$URL"
-
-    # Manual trigger with inputs
-    workflow_dispatch:
-      inputs:
-        cluster:
-          description: "Cluster to finalize"
-          type: choice
-          required: true
-          default: devnet
-          options: [devnet, mainnet]
-        confirm:
-          description: "Type FINALIZE to confirm this irreversible action"
-          required: true
-        program_id:
-          description: "Override program ID (blank ⇒ cluster default)"
-          required: false
-          default: ""
