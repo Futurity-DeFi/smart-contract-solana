@@ -287,7 +287,7 @@ jobs:
             > verify.log 2>&1
           ls -l verify.log || echo "verify.log not found"
           pwd
-cat verify.log || echo "verify.log is empty"
+          cat verify.log || echo "verify.log is empty"
           if grep -q "Verification succeeded" verify.log; then
             echo "✅ Devnet verification passed."
           else
