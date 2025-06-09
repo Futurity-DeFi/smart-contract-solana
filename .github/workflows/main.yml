@@ -11,7 +11,7 @@ env:
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
   SOLANA_CLUSTER_URL: https://api.devnet.solana.com   # CHANGE for mainnet-beta
-  PROGRAM_PUBKEY: G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a
+  PROGRAM_PUBKEY: GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv
 
 jobs:
 ###############################################################################

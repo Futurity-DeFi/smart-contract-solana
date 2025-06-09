@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a");
+declare_id!("GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv");
 
 /// -------------------------------------------------------------------------
 /// Security.txt for Futurity Protocol

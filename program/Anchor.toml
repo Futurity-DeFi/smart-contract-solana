@@ -4,13 +4,13 @@ skip-lint = false
 seeds = false
 
 [programs.localnet]
-futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+futurity = "GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv"
 
 [programs.devnet]
-futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+futurity = "GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv"
 
 [programs.mainnet]
-futurity = "G5vZC5LFoB3yFTyFtZjhW7mf8p9yuioVgFJ8WEGP2g1a"
+futurity = "GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv"
 
 [registry]
 url = "https://api.apr.dev"
