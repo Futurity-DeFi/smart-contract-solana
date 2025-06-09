@@ -60,6 +60,7 @@ jobs:
 
     - name: Add CLI to PATH
       run: |
+        export PATH="$PWD/solana-release/bin:$PATH"
         echo "$PWD/solana-release/bin" >> $GITHUB_PATH
         solana --version
 
