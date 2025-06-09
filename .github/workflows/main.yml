@@ -8,22 +8,22 @@ on:
   workflow_dispatch:
     inputs:
       cluster:
-        description: "For FINALIZE step: devnet or mainnet"
+        description: "For FINALIZE step"
         type: choice
         default: devnet
         options: [devnet, mainnet]
         required: true
       confirm:
-        description: "Type FINALIZE to confirm irreversible step"
+        description: "Type FINALIZE to confirm irreversible action"
         required: true
       program_id:
         description: "Override program-id (blank ⇒ default)"
         required: false
         default: ""
 
-# ───────── global versions / constants ─────────
+# ───────── global constants ─────────
 env:
-  SOLANA_VERSION: 2.2.15-jito          # one source of truth
+  SOLANA_VERSION: 2.2.15-jito
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
 
@@ -40,70 +40,77 @@ defaults:
   run:
     shell: bash
 
-# ═════════ reusable blocks ═════════
-install-scli: &install-scli
-  - uses: actions/cache@v4
-    id: solcache
-    with:
-      path: solana-release
-      key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
-  - if: steps.solcache.outputs.cache-hit != 'true'
-    run: |
-      ARCH=solana-release-x86_64-unknown-linux-gnu.tar.bz2
-      URL="https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}/${ARCH}"
-      curl -L --retry 5 --retry-delay 3 -o $ARCH "$URL"
+###############################################################################
+# helper step groups implemented as reusable inline bash functions
+###############################################################################
+# → call with:  bash install_solana.sh
+###############################################################################
+- name: install_solana_helper
+  shell: bash
+  run: |
+    cat > install_solana.sh <<'EOS'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARCH=solana-release-x86_64-unknown-linux-gnu.tar.bz2
+    if [ ! -d solana-release ]; then
+      echo "⏬ Installing Solana CLI $SOLANA_VERSION"
+      curl -L --retry 5 --retry-delay 3 \
+        -o $ARCH \
+        "https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}/${ARCH}"
       tar -xjf $ARCH
-  - run: |
-      echo "$PWD/solana-release/bin" >> $GITHUB_PATH
-      solana --version
+    fi
+    echo "$PWD/solana-release/bin" >> "$GITHUB_PATH"
+    solana --version
+    EOS
+    chmod +x install_solana.sh
 
-restore-keys: &restore-keys
-  - run: |
-      printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program.json
-      printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}'  > deploy.json
-      chmod 600 program.json deploy.json
-
-pull-svb: &pull-svb
-  - uses: actions/cache@v4
-    id: svb
-    with:
-      path: /tmp/svb_cache          # dummy path (small)
-      key: svb-${{ env.SOLANA_VERSION }}
-  - if: steps.svb.outputs.cache-hit != 'true'
-    run: docker pull solanafoundation/solana-verifiable-build:${SOLANA_VERSION}
-
-# ═════════ JOBS ═════════
-jobs:
 ###############################################################################
 # 1️⃣ PRE-CHECK
 ###############################################################################
+jobs:
   precheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 1}
+        with: { fetch-depth: 1 }
 
-      - <<: *install-scli
-      - <<: *restore-keys
+      - name: Cache Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
 
-      - name: Validate Program ID
+      - name: Install Solana CLI
+        run: bash install_solana.sh
+
+      - name: Restore keypairs and validate Program ID
         run: |
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program.json
+          printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}'  > deploy.json
+          chmod 600 program.json deploy.json
+
           EXPECTED=$(solana-keygen pubkey program.json)
           echo "Keypair  : $EXPECTED"
           echo "Expected : $PROGRAM_PUBKEY"
           [[ "$EXPECTED" == "$PROGRAM_PUBKEY" ]]
 
 ###############################################################################
-# 2️⃣ BUILD  (cargo build-sbf)
+# 2️⃣ BUILD (cargo build-sbf)
 ###############################################################################
   build:
     needs: precheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 1}
+        with: { fetch-depth: 1 }
 
-      - <<: *install-scli
+      - name: Cache Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: bash install_solana.sh
 
       - uses: actions/cache@v4
         with:
@@ -112,10 +119,12 @@ jobs:
             ~/.cargo/git
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - working-directory: program
+      - name: Build SBF
+        working-directory: program
         run: cargo build-sbf
 
-      - run: |
+      - name: Package artefacts
+        run: |
           mkdir artefacts
           cp program/target/deploy/futurity.so artefacts/
           shasum -a 256 artefacts/futurity.so > artefacts/futurity.sha256
@@ -134,10 +143,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: artefacts-${{ github.sha }}, path: artefacts}
+        with: { name: artefacts-${{ github.sha }}, path: artefacts }
 
-      - <<: *install-scli
-      - <<: *restore-keys
+      - name: Cache Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: bash install_solana.sh
+
+      - name: Restore keypairs
+        run: |
+          printf '%s' '${{ secrets.PROGRAM_KEYPAIR }}' > program.json
+          printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}'  > deploy.json
+          chmod 600 program.json deploy.json
 
       - name: Deploy to Devnet
         run: |
@@ -154,10 +174,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 1}
+        with: { fetch-depth: 1 }
 
-      - <<: *install-scli
-      - <<: *pull-svb                         # cache Docker image
+      - name: Cache Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: bash install_solana.sh
+
+      - name: Cache SVB Docker image
+        uses: actions/cache@v4
+        id: svb
+        with:
+          path: /tmp/svb_cache        # dummy
+          key: svb-${{ env.SOLANA_VERSION }}
+      - if: steps.svb.outputs.cache-hit != 'true'
+        run: docker pull solanafoundation/solana-verifiable-build:${SOLANA_VERSION}
 
       - uses: actions/cache@v4
         id: verifycache
@@ -183,7 +217,7 @@ jobs:
             echo "✅ Verification passed." || { cat verify.log; exit 1; }
 
 ###############################################################################
-# 5️⃣ MAINNET DEPLOY  (manual gate)
+# 5️⃣ MAINNET DEPLOY (manual gate)
 ###############################################################################
   mainnet-deploy:
     needs: verify
@@ -192,34 +226,38 @@ jobs:
       name: mainnet
       url: https://explorer.solana.com/address/${{ env.PROGRAM_PUBKEY }}?cluster=mainnet-beta
     steps:
-      # manual approval + fund check
-      - name: Approve & ensure ≥2 SOL in deployer wallet
+      - name: Manual approval & fund check
         uses: trstringer/manual-approval@v1
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}
           approvers: ${{ github.actor }}
-          issue-body: >
-            Ensure DEPLOY_KEYPAIR_MAINNET is funded (balance ≥ 2 SOL):
-            `solana balance $(solana-keygen pubkey -f <(echo "${{ secrets.DEPLOY_KEYPAIR_MAINNET }}")) --url https://api.mainnet-beta.solana.com`
+          issue-body: |
+            Fund DEPLOY_KEYPAIR_MAINNET with ≥ 2 SOL before approving.
 
       - uses: actions/download-artifact@v4
-        with: {name: artefacts-${{ github.sha }}, path: artefacts}
+        with: { name: artefacts-${{ github.sha }}, path: artefacts }
 
-      - <<: *install-scli
-      - <<: *pull-svb
-      - run: |
+      - name: Cache Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: bash install_solana.sh
+
+      - name: Restore mainnet keypairs
+        run: |
           printf '%s' '${{ secrets.PROGRAM_KEYPAIR_MAINNET }}' > program-main.json
           printf '%s' '${{ secrets.DEPLOY_KEYPAIR_MAINNET }}'  > deploy-main.json
           chmod 600 program-main.json deploy-main.json
 
-      - name: Deploy to Mainnet-beta
+      - name: Deploy to mainnet-beta
         run: |
           solana config set --url $MAINNET_URL --keypair deploy-main.json
           solana program deploy artefacts/futurity.so \
             --program-id program-main.json \
             --upgrade-authority program-main.json
 
-      # remote & deterministic verify on mainnet
       - name: Verify on mainnet (deterministic)
         run: |
           solana-verify verify-from-repo \
@@ -247,29 +285,39 @@ jobs:
             --keypair deploy-main.json
 
 ###############################################################################
-# 6️⃣ FINALIZE UPGRADE AUTHORITY (optional manual)
+# 6️⃣ FINALIZE (optional manual)
 ###############################################################################
   finalize-upgrade-authority:
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.confirm == 'FINALIZE'
     needs: [verify, mainnet-deploy]
-    if: >
-      (needs.verify.result == 'success') &&
-      (github.event.inputs.confirm == 'FINALIZE')
     runs-on: ubuntu-latest
     steps:
-      - <<: *install-scli
-      - run: |
+      - name: Install Solana CLI
+        uses: actions/cache@v4
+        with:
+          path: solana-release
+          key: solana-${{ runner.os }}-${{ env.SOLANA_VERSION }}
+      - run: bash install_solana.sh
+
+      - name: Restore deployer key (chosen cluster)
+        run: |
           if [[ "${{ github.event.inputs.cluster }}" == "mainnet" ]]; then
-            URL=$MAINNET_URL
             printf '%s' '${{ secrets.DEPLOY_KEYPAIR_MAINNET }}' > deployer.json
+            URL=$MAINNET_URL
           else
-            URL=$DEVNET_URL
             printf '%s' '${{ secrets.DEPLOY_KEYPAIR }}' > deployer.json
+            URL=$DEVNET_URL
           fi
           chmod 600 deployer.json
+
           PROG="${{ github.event.inputs.program_id || env.PROGRAM_PUBKEY }}"
           solana config set --url "$URL" --keypair deployer.json
           solana program show "$PROG" --url "$URL" >/dev/null || {
             echo "::error::Program not found"; exit 1; }
+
           solana program set-upgrade-authority "$PROG" \
             --new-upgrade-authority null
+
           solana program show "$PROG" --url "$URL"
