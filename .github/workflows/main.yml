@@ -141,7 +141,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: {name: artefacts-${{ github.sha }}, path: artefacts}
+        with:
+          name: artefacts-${{ github.sha }}
+          path: artefacts
 
       - name: Cache Solana CLI
         uses: actions/cache@v4
@@ -236,7 +238,9 @@ jobs:
           issue-body: "Fund DEPLOY_KEYPAIR_MAINNET with ≥ 2 SOL, then approve."
 
       - uses: actions/download-artifact@v4
-        with: {name: artefacts-${{ github.sha }}, path: artefacts}
+        with:
+          name: artefacts-${{ github.sha }}
+          path: artefacts
 
       - name: Cache Solana CLI
         uses: actions/cache@v4
