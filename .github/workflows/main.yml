@@ -23,7 +23,7 @@ on:
 
 # ────────── globals ──────────
 env:
-  SOLANA_VERSION: 2.2.15-jito          # build + verify tool-chain
+  SOLANA_VERSION: 2.2.15          # build + verify tool-chain
   DEVNET_URL:  https://api.devnet.solana.com
   MAINNET_URL: https://api.mainnet-beta.solana.com
   PROGRAM_PUBKEY: GMaCbLs28PYev8gJoPCb1XSHaLpufNqGbNeXEz5c7jzv
@@ -65,7 +65,7 @@ jobs:
           if [[ ! -d solana-release ]]; then
             echo "⏬ Installing Solana CLI $SOLANA_VERSION"
             curl -L --retry 5 --retry-delay 3 -o $ARCH \
-              "https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}/${ARCH}"
+              "https://github.com/jito-foundation/jito-solana/releases/download/v${SOLANA_VERSION}-jito/${ARCH}"
             tar -xjf $ARCH
           fi
           export PATH="$PWD/solana-release/bin:$PATH"
