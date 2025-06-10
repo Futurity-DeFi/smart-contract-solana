@@ -1,0 +1,57 @@
+name: 'Restore Keypairs'
+description: 'Restore and secure keypair files from secrets'
+inputs:
+  keypair-type:
+    description: 'Type of keypairs to restore: devnet, mainnet, or single'
+    required: true
+    default: 'devnet'
+  program-secret:
+    description: 'GitHub secret name for program keypair'
+    required: true
+  deploy-secret:
+    description: 'GitHub secret name for deploy keypair'
+    required: false
+    default: ""
+outputs:
+  program-file:
+    description: 'Path to program keypair file'
+    value: ${{ steps.restore.outputs.program-file }}
+  deploy-file:
+    description: 'Path to deploy keypair file'
+    value: ${{ steps.restore.outputs.deploy-file }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Restore keypairs
+      id: restore
+      shell: bash
+      run: |
+        case "${{ inputs.keypair-type }}" in
+          "mainnet")
+            printf '%s' '${{ inputs.program-secret }}' > program-main.json
+            if [ -n "${{ inputs.deploy-secret }}" ]; then
+              printf '%s' '${{ inputs.deploy-secret }}' > deploy-main.json
+              chmod 600 program-main.json deploy-main.json
+              echo "deploy-file=deploy-main.json" >> $GITHUB_OUTPUT
+            else
+              chmod 600 program-main.json
+            fi
+            echo "program-file=program-main.json" >> $GITHUB_OUTPUT
+            ;;
+          "single")
+            printf '%s' '${{ inputs.program-secret }}' > program.json
+            chmod 600 program.json
+            echo "program-file=program.json" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            printf '%s' '${{ inputs.program-secret }}' > program.json
+            if [ -n "${{ inputs.deploy-secret }}" ]; then
+              printf '%s' '${{ inputs.deploy-secret }}' > deploy.json
+              chmod 600 program.json deploy.json
+              echo "deploy-file=deploy.json" >> $GITHUB_OUTPUT
+            else
+              chmod 600 program.json
+            fi
+            echo "program-file=program.json" >> $GITHUB_OUTPUT
+            ;;
+        esac

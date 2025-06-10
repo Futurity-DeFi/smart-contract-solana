@@ -1,0 +1,52 @@
+name: 'Setup Solana CLI'
+description: 'Install and cache Solana CLI'
+inputs:
+  solana-version:
+    description: 'Solana CLI version'
+    required: true
+    default: '2.1.0'
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache Solana CLI
+      id: cache-solana
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/share/solana
+        key: solana-${{ runner.os }}-${{ inputs.solana-version }}
+
+    - name: Install Solana CLI
+      if: steps.cache-solana.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "🔧 Installing Solana CLI v${{ inputs.solana-version }}"
+        export SOLANA_INSTALL_INIT_SKIP_APPLY_RUSTC_OVERRIDE=1
+        sh -c "$(curl -sSfL https://release.anza.xyz/v${{ inputs.solana-version }}/install)"
+        
+        # Verify installation worked
+        if [ -d "$HOME/.local/share/solana/install/active_release/bin" ]; then
+          echo "✅ Solana CLI installed successfully"
+          ls -la "$HOME/.local/share/solana/install/active_release/bin/"
+        else
+          echo "❌ Solana CLI installation failed - checking alternative paths"
+          find "$HOME/.local/share/solana" -name "solana" -type f 2>/dev/null || echo "No solana binary found"
+          exit 1
+        fi
+
+    - name: Verify installation exists
+      shell: bash
+      run: |
+        if [ ! -d "$HOME/.local/share/solana/install/active_release/bin" ]; then
+          echo "❌ Solana bin directory not found after cache restore"
+          echo "Checking what's in the solana directory:"
+          find "$HOME/.local/share/solana" -type f 2>/dev/null || echo "Solana directory is empty or doesn't exist"
+          exit 1
+        else
+          echo "✅ Solana bin directory found"
+          ls -la "$HOME/.local/share/solana/install/active_release/bin/"
+        fi
+
+    - name: Add Solana to PATH
+      shell: bash
+      run: |
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH

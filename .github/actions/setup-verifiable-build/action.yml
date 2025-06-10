@@ -1,0 +1,73 @@
+name: 'Setup Verifiable Build'
+description: 'Cache and pull Solana verifiable build Docker image'
+inputs:
+  solana-version:
+    description: 'Solana version for verifiable build image'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Debug cache setup
+      shell: bash
+      run: |
+        echo "🔧 Cache setup debug info:"
+        echo "Solana version: ${{ inputs.solana-version }}"
+        echo "Cache key will be: svb-docker-${{ inputs.solana-version }}"
+        echo "Cache path: /tmp/docker-svb-cache.tar"
+        echo "Current /tmp contents:"
+        ls -la /tmp/ || echo "/tmp not accessible"
+
+    - name: Cache verifiable-build Docker image
+      id: cache-image
+      uses: actions/cache@v4
+      with:
+        path: /tmp/docker-svb-cache.tar
+        key: svb-docker-${{ inputs.solana-version }}
+
+    - name: Load cached Docker image
+      if: steps.cache-image.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        echo "📦 Loading cached Docker image..."
+        if [ -f /tmp/docker-svb-cache.tar ]; then
+          docker load -i /tmp/docker-svb-cache.tar
+          echo "✅ Docker image loaded from cache"
+        else
+          echo "❌ Cache file not found but cache-hit was true - this shouldn't happen"
+          echo "Current directory contents:"
+          ls -la /tmp/
+          exit 1
+        fi
+
+    - name: Pull and cache verifiable build image
+      if: steps.cache-image.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "🔄 Pulling Docker image (not in cache)..."
+        docker pull solanafoundation/solana-verifiable-build:${{ inputs.solana-version }}
+        echo "💾 Saving Docker image to cache..."
+        mkdir -p /tmp
+        docker save solanafoundation/solana-verifiable-build:${{ inputs.solana-version }} -o /tmp/docker-svb-cache.tar
+        echo "✅ Docker image cached successfully"
+        echo "Cache file info:"
+        ls -lh /tmp/docker-svb-cache.tar
+
+    - name: Verify Docker image is available
+      shell: bash
+      run: |
+        echo "🔍 Verifying Docker image is available..."
+        echo "Available Docker images:"
+        docker images
+        echo ""
+        echo "Looking for solanafoundation/solana-verifiable-build:${{ inputs.solana-version }}..."
+        if docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "solanafoundation/solana-verifiable-build:${{ inputs.solana-version }}"; then
+          echo "✅ Docker image verified: solanafoundation/solana-verifiable-build:${{ inputs.solana-version }}"
+          echo "Image details:"
+          docker images | grep solana-verifiable-build
+        else
+          echo "❌ Docker image not found"
+          echo "Expected: solanafoundation/solana-verifiable-build:${{ inputs.solana-version }}"
+          echo "Available solana images:"
+          docker images | grep -i solana || echo "No solana images found"
+          exit 1
+        fi

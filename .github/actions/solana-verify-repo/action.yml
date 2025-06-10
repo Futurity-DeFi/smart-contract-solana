@@ -1,0 +1,258 @@
+name: 'Solana Verify From Repo'
+description: 'Run solana-verify verify-from-repo with standard parameters'
+inputs:
+  cluster-url:
+    description: 'Solana cluster URL'
+    required: true
+  program-id:
+    description: 'Program ID to verify'
+    required: true
+  library-name:
+    description: 'Library name in Cargo.toml'
+    required: true
+    default: 'futurity'
+  commit-hash:
+    description: 'Git commit hash'
+    required: true
+  mount-path:
+    description: 'Mount path for verification'
+    required: true
+  repository-url:
+    description: 'GitHub repository URL'
+    required: true
+  output-file:
+    description: 'Output log file name'
+    required: false
+    default: 'verify.log'
+  artifacts-dir:
+    description: 'Directory to save verification artifacts'
+    required: false
+    default: 'verification-artifacts'
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare verification artifacts directory
+      shell: bash
+      run: |
+        echo "📁 Creating verification artifacts directory..."
+        mkdir -p ${{ inputs.artifacts-dir }}
+        echo "📋 Directory created: ${{ inputs.artifacts-dir }}"
+
+    - name: Download on-chain program
+      shell: bash
+      run: |
+        echo "📥 Downloading on-chain program for comparison..."
+        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+        
+        # Create a temporary keypair for commands that require a signer (but don't actually use it)
+        # This is needed for some solana CLI commands even when just reading public data
+        mkdir -p $HOME/.config/solana
+        solana-keygen new --no-bip39-passphrase --silent --outfile $HOME/.config/solana/id.json || true
+        
+        # Download the deployed program
+        echo "🔍 Getting program account info..."
+        solana account ${{ inputs.program-id }} --url ${{ inputs.cluster-url }} --output json > ${{ inputs.artifacts-dir }}/onchain-program-account.json
+        
+        # Extract and save the executable data
+        echo "💾 Extracting executable program data..."
+        solana program dump ${{ inputs.program-id }} ${{ inputs.artifacts-dir }}/onchain-program.so --url ${{ inputs.cluster-url }}
+        
+        # Get program info
+        echo "📊 Getting program info..."
+        solana program show ${{ inputs.program-id }} --url ${{ inputs.cluster-url }} > ${{ inputs.artifacts-dir }}/onchain-program-info.txt
+        
+        # Calculate hash of downloaded program
+        echo "🔢 Calculating hash of on-chain program..."
+        shasum -a 256 ${{ inputs.artifacts-dir }}/onchain-program.so > ${{ inputs.artifacts-dir }}/onchain-program.sha256
+        
+        echo "📋 On-chain program artifacts saved:"
+        ls -la ${{ inputs.artifacts-dir }}/onchain-*
+
+    - name: Run verification and save artifacts
+      shell: bash
+      working-directory: program
+      run: |
+        echo "🔍 Starting solana-verify verification process..."
+        
+        # Ensure PATH includes Solana CLI
+        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+        
+        # Debug environment
+        echo "🔧 Debug environment info:"
+        echo "PATH: $PATH"
+        echo "Current directory: $(pwd)"
+        echo "Home directory: $HOME"
+        echo "Solana CLI location: $(which solana || echo 'not found')"
+        echo "Solana-verify location: $(which solana-verify || echo 'not found')"
+        echo "Docker available: $(docker --version || echo 'not available')"
+        
+        # Show the current workspace structure for alignment verification
+        echo "📂 Current workspace structure (same as build):"
+        echo "Working directory: $(pwd)"
+        ls -la
+        echo "📄 Workspace Cargo.toml:"
+        cat Cargo.toml || echo "No workspace Cargo.toml found"
+        echo "📂 Programs directory:"
+        ls -la programs/ || echo "No programs directory found"
+        echo "📂 Futurity program:"
+        ls -la programs/futurity/ || echo "No futurity directory found"
+        echo "📄 Futurity Cargo.toml:"
+        cat programs/futurity/Cargo.toml || echo "No futurity Cargo.toml found"
+        echo "📋 Verifying Cargo.lock exists:"
+        ls -la Cargo.lock || echo "No Cargo.lock found"
+        
+        # Ensure artifacts directory exists relative to program/
+        mkdir -p ../${{ inputs.artifacts-dir }}
+        
+        set -x
+        
+        # Run verification with detailed output and error handling
+        # Mount path is "program" - this will mount the same directory structure as our build
+        # The verification should find Cargo.lock, Cargo.toml, and programs/futurity/ just like the build
+        solana-verify verify-from-repo ${{ inputs.repository-url }} \
+          --url ${{ inputs.cluster-url }} \
+          --program-id ${{ inputs.program-id }} \
+          --library-name ${{ inputs.library-name }} \
+          --mount-path ${{ inputs.mount-path }} \
+          --commit-hash ${{ inputs.commit-hash }} \
+          --skip-prompt | tee ${{ inputs.output-file }}
+        
+        # Capture the exit status
+        VERIFY_EXIT_CODE=${PIPESTATUS[0]}
+        
+        # Copy the verification log to artifacts (using relative path from program/)
+        cp ${{ inputs.output-file }} ../${{ inputs.artifacts-dir }}/
+        
+        set +x
+        echo "📄 Verification log saved to artifacts"
+        
+        # If verification failed, still continue to collect artifacts but note the failure
+        if [ $VERIFY_EXIT_CODE -ne 0 ]; then
+          echo "⚠️ Verification process exited with code $VERIFY_EXIT_CODE"
+          echo "Will continue to collect artifacts for debugging"
+        fi
+
+    - name: Collect build artifacts
+      shell: bash
+      run: |
+        echo "📦 Collecting verification build artifacts..."
+        
+        # Look for any .so files created during verification
+        echo "🔍 Looking for built .so files..."
+        find . -name "*.so" -type f 2>/dev/null | while read -r file; do
+          if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            echo "📁 Found .so file: $file"
+            cp "$file" "${{ inputs.artifacts-dir }}/built-${filename}"
+            shasum -a 256 "$file" > "${{ inputs.artifacts-dir }}/built-${filename}.sha256"
+          fi
+        done
+        
+        # Look for any verification workspace or build directories
+        echo "🔍 Looking for verification build directories..."
+        if [ -d ".solana-verify" ]; then
+          echo "📂 Found .solana-verify directory, copying contents..."
+          cp -r .solana-verify ${{ inputs.artifacts-dir }}/solana-verify-workspace/
+        fi
+        
+        # Look for any docker build outputs
+        echo "🔍 Looking for Docker build outputs..."
+        if [ -d "/tmp/solana-verify" ]; then
+          echo "📂 Found /tmp/solana-verify directory..."
+          sudo cp -r /tmp/solana-verify ${{ inputs.artifacts-dir }}/tmp-solana-verify/ 2>/dev/null || echo "Could not copy /tmp/solana-verify"
+        fi
+        
+        # Save verification metadata
+        echo "📝 Saving verification metadata..."
+        cat > ${{ inputs.artifacts-dir }}/verification-metadata.json << EOF
+        {
+          "cluster_url": "${{ inputs.cluster-url }}",
+          "program_id": "${{ inputs.program-id }}",
+          "library_name": "${{ inputs.library-name }}",
+          "commit_hash": "${{ inputs.commit-hash }}",
+          "mount_path": "${{ inputs.mount-path }}",
+          "repository_url": "${{ inputs.repository-url }}",
+          "verification_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "runner_os": "$RUNNER_OS"
+        }
+        EOF
+
+    - name: Display verification results
+      shell: bash
+      run: |
+        echo "📊 Verification Results Summary:"
+        echo "================================"
+        
+        # Check if log file exists
+        if [ -f "program/${{ inputs.output-file }}" ]; then
+          echo "📄 Verification log contents:"
+          cat "program/${{ inputs.output-file }}"
+        elif [ -f "${{ inputs.artifacts-dir }}/${{ inputs.output-file }}" ]; then
+          echo "📄 Verification log contents:"
+          cat "${{ inputs.artifacts-dir }}/${{ inputs.output-file }}"
+        else
+          echo "⚠️ Verification log file not found"
+          echo "Looking for log files..."
+          find . -name "*verify*" -o -name "*.log" 2>/dev/null || echo "No log files found"
+        fi
+        
+        echo ""
+        echo "📁 Artifacts saved in ${{ inputs.artifacts-dir }}:"
+        ls -la ${{ inputs.artifacts-dir }}/ || echo "Artifacts directory not accessible"
+        echo ""
+        echo "🔢 Hash comparison:"
+        if [ -f "${{ inputs.artifacts-dir }}/onchain-program.sha256" ]; then
+          echo "On-chain program hash:"
+          cat ${{ inputs.artifacts-dir }}/onchain-program.sha256
+        fi
+        if [ -f "${{ inputs.artifacts-dir }}/built-futurity.so.sha256" ]; then
+          echo "Built program hash:"
+          cat ${{ inputs.artifacts-dir }}/built-futurity.so.sha256
+        fi
+
+    - name: Verify success
+      shell: bash
+      run: |
+        echo "🔍 Checking verification success..."
+        
+        # Look for the log file in multiple possible locations
+        LOG_FILE=""
+        if [ -f "program/${{ inputs.output-file }}" ]; then
+          LOG_FILE="program/${{ inputs.output-file }}"
+        elif [ -f "${{ inputs.artifacts-dir }}/${{ inputs.output-file }}" ]; then
+          LOG_FILE="${{ inputs.artifacts-dir }}/${{ inputs.output-file }}"
+        fi
+        
+        if [ -n "$LOG_FILE" ]; then
+          echo "📄 Checking log file: $LOG_FILE"
+          
+          # Check for success indicators
+          if grep -q "Verification succeeded\|Successfully verified\|Build verification passed" "$LOG_FILE"; then
+            echo "✅ Verification succeeded!"
+            exit 0
+          elif grep -q "Error:\|Failed\|failed" "$LOG_FILE"; then
+            echo "❌ Verification failed with errors"
+            echo "📄 Last 30 lines of verification log:"
+            tail -30 "$LOG_FILE"
+            
+            # Check if it's a known issue that we can work around
+            if grep -q "No such file or directory" "$LOG_FILE"; then
+              echo ""
+              echo "🔧 This appears to be a toolchain/environment issue in the verification process."
+              echo "The program compiled successfully, but the verification environment had missing dependencies."
+              echo "This is often a temporary issue with the solana-verify toolchain setup."
+            fi
+            exit 1
+          else
+            echo "⚠️ Verification completed but status unclear"
+            echo "📄 Last 30 lines of verification log:"
+            tail -30 "$LOG_FILE"
+            echo ""
+            echo "ℹ️ Manual review may be required"
+            exit 1
+          fi
+        else
+          echo "❌ No verification log found"
+          echo "This indicates the verification process failed to start or complete"
+          exit 1
+        fi

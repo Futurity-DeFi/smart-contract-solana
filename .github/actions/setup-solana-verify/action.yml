@@ -1,0 +1,65 @@
+name: 'Setup Solana Verify'
+description: 'Install and cache solana-verify tool'
+inputs:
+  version:
+    description: 'solana-verify version'
+    required: true
+    default: '0.4.6'
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache solana-verify
+      id: cache-verify
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/solana-verify
+        key: solverify-${{ runner.os }}-${{ inputs.version }}
+
+    - name: Install solana-verify
+      if: steps.cache-verify.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "🔧 Installing solana-verify..."
+        
+        # Ensure we have the latest Rust and cargo
+        echo "🦀 Rust version:"
+        rustc --version
+        echo "📦 Cargo version:"
+        cargo --version
+        
+        # Install with retry logic
+        for attempt in 1 2 3; do
+          echo "📥 Attempt $attempt: Installing solana-verify..."
+          if cargo install solana-verify --locked --force; then
+            echo "✅ solana-verify installed successfully on attempt $attempt"
+            break
+          else
+            echo "❌ Attempt $attempt failed"
+            if [ $attempt -eq 3 ]; then
+              echo "🚨 All installation attempts failed"
+              exit 1
+            fi
+            echo "⏳ Waiting 10 seconds before retry..."
+            sleep 10
+          fi
+        done
+        
+        # Verify installation
+        echo "🔍 Verifying solana-verify installation..."
+        which solana-verify
+        solana-verify --version || echo "Version check failed, but binary exists"
+
+    - name: Verify solana-verify is available
+      shell: bash
+      run: |
+        echo "🔍 Final verification of solana-verify setup..."
+        echo "📍 solana-verify location: $(which solana-verify || echo 'NOT FOUND')"
+        echo "📦 solana-verify version:"
+        solana-verify --version || echo "❌ Version command failed"
+        echo "🔧 PATH includes:"
+        echo "$PATH" | tr ':' '\n' | grep -E "(cargo|\.cargo)" || echo "No cargo paths found in PATH"
+        
+        # Test basic functionality
+        echo "🧪 Testing basic solana-verify functionality..."
+        solana-verify --help > /dev/null && echo "✅ Help command works" || echo "❌ Help command failed"
+ 

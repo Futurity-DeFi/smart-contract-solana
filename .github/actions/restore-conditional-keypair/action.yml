@@ -1,0 +1,42 @@
+name: 'Restore Conditional Keypair'
+description: 'Restore keypair based on cluster selection'
+inputs:
+  cluster:
+    description: 'Target cluster (mainnet or devnet)'
+    required: true
+  mainnet-secret:
+    description: 'GitHub secret for mainnet keypair'
+    required: true
+  devnet-secret:
+    description: 'GitHub secret for devnet keypair'
+    required: true
+  mainnet-url:
+    description: 'Mainnet URL'
+    required: true
+  devnet-url:
+    description: 'Devnet URL'
+    required: true
+outputs:
+  keypair-file:
+    description: 'Path to the restored keypair file'
+    value: ${{ steps.restore.outputs.keypair-file }}
+  cluster-url:
+    description: 'Selected cluster URL'
+    value: ${{ steps.restore.outputs.cluster-url }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Restore conditional keypair
+      id: restore
+      shell: bash
+      run: |
+        if [[ "${{ inputs.cluster }}" == "mainnet" ]]; then
+          printf '%s' '${{ inputs.mainnet-secret }}' > deployer.json
+          echo "keypair-file=deployer.json" >> $GITHUB_OUTPUT
+          echo "cluster-url=${{ inputs.mainnet-url }}" >> $GITHUB_OUTPUT
+        else
+          printf '%s' '${{ inputs.devnet-secret }}' > deployer.json
+          echo "keypair-file=deployer.json" >> $GITHUB_OUTPUT
+          echo "cluster-url=${{ inputs.devnet-url }}" >> $GITHUB_OUTPUT
+        fi
+        chmod 600 deployer.json
