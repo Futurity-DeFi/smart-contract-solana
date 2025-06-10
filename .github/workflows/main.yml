@@ -576,6 +576,9 @@ jobs:
           path: mainnet-deployment-artifacts
           retention-days: 90
 
+      - name: Setup solana-verify for mainnet verification
+        uses: ./.github/actions/setup-solana-verify
+
       - name: Verify on mainnet
         uses: ./.github/actions/solana-verify-repo
         with:
