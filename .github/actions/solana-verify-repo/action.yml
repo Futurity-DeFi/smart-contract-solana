@@ -20,6 +20,9 @@ inputs:
   repository-url:
     description: 'GitHub repository URL'
     required: true
+  keypair-path:
+    description: 'Path to keypair file for PDA creation and signing'
+    required: true
   output-file:
     description: 'Output log file name'
     required: false
@@ -109,12 +112,14 @@ runs:
         # Run verification with detailed output and error handling
         # Mount path is "program" - this will mount the same directory structure as our build
         # The verification should find Cargo.lock, Cargo.toml, and programs/futurity/ just like the build
+        # Use provided keypair for PDA creation and signing
         solana-verify verify-from-repo ${{ inputs.repository-url }} \
           --url ${{ inputs.cluster-url }} \
           --program-id ${{ inputs.program-id }} \
           --library-name ${{ inputs.library-name }} \
           --mount-path ${{ inputs.mount-path }} \
           --commit-hash ${{ inputs.commit-hash }} \
+          --keypair ${{ inputs.keypair-path }} \
           --skip-prompt | tee ${{ inputs.output-file }}
         
         # Capture the exit status
@@ -172,6 +177,7 @@ runs:
           "commit_hash": "${{ inputs.commit-hash }}",
           "mount_path": "${{ inputs.mount-path }}",
           "repository_url": "${{ inputs.repository-url }}",
+          "keypair_path": "${{ inputs.keypair-path }}",
           "verification_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
           "runner_os": "$RUNNER_OS"
         }

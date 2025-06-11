@@ -392,6 +392,13 @@ jobs:
           
           echo "✅ Verification parameters prepared"
 
+      - name: Restore keypairs for verification
+        uses: ./.github/actions/restore-keypairs
+        with:
+          keypair-type: devnet
+          program-secret: ${{ secrets.PROGRAM_KEYPAIR }}
+          deploy-secret: ${{ secrets.DEPLOY_KEYPAIR }}
+
       - name: Deterministic verify (Devnet)
         id: verify
         continue-on-error: true
@@ -403,6 +410,7 @@ jobs:
           commit-hash: ${{ github.sha }}
           mount-path: ${{ env.MOUNT_PATH }}
           repository-url: https://github.com/${{ github.repository }}
+          keypair-path: deploy.json
           artifacts-dir: devnet-verification-artifacts
 
       - name: Handle verification result
@@ -588,6 +596,7 @@ jobs:
           commit-hash: ${{ github.sha }}
           mount-path: ${{ env.MOUNT_PATH }}
           repository-url: https://github.com/${{ github.repository }}
+          keypair-path: deploy-main.json
           artifacts-dir: mainnet-verification-artifacts
 
       - name: Upload mainnet verification artifacts
