@@ -30,7 +30,7 @@ env:
   SOLANA_VERSION: 2.1.0
   DEVNET_URL:  https://api.devnet.solana.com
   MAINNET_URL: https://api.mainnet-beta.solana.com
-  PROGRAM_PUBKEY: CP1yRKgSqYFosUQ8CBjooLheAKKfKDVq93RGwarKAs1
+  PROGRAM_PUBKEY: 45NNnmsshdzzaZeQ8o1AAQTsmxhSX5FRzjVbMS2MFBMx
   MOUNT_PATH: program
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
@@ -294,7 +294,7 @@ jobs:
           ls -lh artefacts/futurity.so
           solana program deploy artefacts/futurity.so \
               --program-id program.json \
-              --upgrade-authority program.json \
+              --upgrade-authority deploy.json \
               --output json | tee deploy-log.json
           echo "✅ Deployment output:"
           cat deploy-log.json
@@ -536,7 +536,7 @@ jobs:
           echo "📦 Deploying to mainnet-beta..."
           solana program deploy artefacts/futurity.so \
             --program-id program-main.json \
-            --upgrade-authority program-main.json
+            --upgrade-authority deploy-main.json
           echo "💰 Post-deployment mainnet deployer balance:"
           solana balance $(solana-keygen pubkey deploy-main.json) --url $MAINNET_URL
           echo "🔍 Verifying mainnet program deployment:"
