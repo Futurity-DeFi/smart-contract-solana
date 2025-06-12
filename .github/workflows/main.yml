@@ -587,6 +587,13 @@ jobs:
       - name: Setup solana-verify for mainnet verification
         uses: ./.github/actions/setup-solana-verify
 
+      - name: Restore keypairs for mainnet verification
+        uses: ./.github/actions/restore-keypairs
+        with:
+          keypair-type: mainnet
+          program-secret: ${{ secrets.PROGRAM_KEYPAIR_MAINNET }}
+          deploy-secret: ${{ secrets.DEPLOY_KEYPAIR_MAINNET }}
+
       - name: Verify on mainnet
         uses: ./.github/actions/solana-verify-repo
         with:
