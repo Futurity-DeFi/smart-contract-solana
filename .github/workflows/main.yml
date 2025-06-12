@@ -746,14 +746,16 @@ jobs:
           echo "   - Cluster: ${{ github.event.inputs.cluster }}"
           echo "   - Confirm: ${{ github.event.inputs.confirm }}"
           echo "   - Program ID override: ${{ github.event.inputs.program_id }}"
+          echo "🔍 Verifying keypair file exists:"
+          ls -la "$KEYPAIR_FILE" || { echo "❌ Keypair file not found: $KEYPAIR_FILE"; exit 1; }
           echo "⚙️ Configuring Solana CLI..."
-          solana config set --url "$CLUSTER_URL" --keypair $KEYPAIR_FILE
+          solana config set --url "$CLUSTER_URL" --keypair "$KEYPAIR_FILE"
           echo "📊 Current configuration:"
           solana config get
           echo "🔍 Current program state before finalization:"
           solana program show "$PID" --url "$CLUSTER_URL"
           echo "⚠️  Setting upgrade authority to null (IRREVERSIBLE)..."
-          solana program set-upgrade-authority "$PID" --new-upgrade-authority null
+          solana program set-upgrade-authority "$PID" --new-upgrade-authority null --keypair "$KEYPAIR_FILE"
           echo "🔍 Final program state after finalization:"
           solana program show "$PID" --url "$CLUSTER_URL"
           echo "✅ Upgrade authority finalization completed - program is now IMMUTABLE!"
