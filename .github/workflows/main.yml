@@ -29,8 +29,8 @@ on:
 env:
   SOLANA_VERSION: 2.1.0
   DEVNET_URL:  https://api.devnet.solana.com
-  MAINNET_URL: ${{ env.MAINNET_URL }}
-  PROGRAM_PUBKEY: ${{ env.PROGRAM_KEY }}
+  MAINNET_URL: ${{ secrets.MAINNET_URL }}
+  PROGRAM_PUBKEY: ${{ secrets.PROGRAM_KEY }}
   MOUNT_PATH: program
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
