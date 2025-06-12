@@ -10,6 +10,18 @@ mod state;
 
 pub use error::TimeLockError;
 
+#[cfg(not(feature = "no-entrypoint"))]
+use solana_security_txt::security_txt;
+
+security_txt! {
+    name: "Futurity DeFi",
+    project_url: "https://futurity.fi",
+    contacts: "email:security@futurity.fi,github:FuturityDeFi",
+    policy: "https://futurity.fi/privacy",
+    preferred_languages: "en",
+    source_code: "https://github.com/Futurity-DeFi/smart-contract-solana"
+}
+
 entrypoint!(process_instruction);
 
 fn process_instruction(
