@@ -30,7 +30,7 @@ env:
   SOLANA_VERSION: 2.1.0
   DEVNET_URL:  https://api.devnet.solana.com
   MAINNET_URL: https://api.mainnet-beta.solana.com
-  PROGRAM_PUBKEY: 45NNnmsshdzzaZeQ8o1AAQTsmxhSX5FRzjVbMS2MFBMx
+  PROGRAM_PUBKEY: FUTrVnQuWRvAMcxDDkcvDig3mYnLUqzimZ6ZLBHB8BNw
   MOUNT_PATH: program
   DOCKER_DEFAULT_PLATFORM: linux/amd64
   CARGO_INCREMENTAL: "0"
